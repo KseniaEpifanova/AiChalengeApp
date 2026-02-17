@@ -22,7 +22,7 @@ class ChatViewModel @Inject constructor(
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading
 
-    fun send(text: String) {
+    fun send(text: String, controlled: Boolean) {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return
 
@@ -35,7 +35,11 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                val reply = repo.ask(trimmed)
+                val reply = if (controlled) {
+                    repo.askControlled(text)
+                } else {
+                    repo.ask(text)
+                }
                 _messages.value = _messages.value + MessageUi(
                     id = UUID.randomUUID().toString(),
                     text = reply,

@@ -8,7 +8,9 @@ data class DsMessage(
 data class DsChatRequest(
     val model: String = "deepseek-chat",
     val messages: List<DsMessage>,
-    val temperature: Double = 0.7
+    val temperature: Double = 0.7,
+    val max_tokens: Int? = null,
+    val stop: List<String>? = null
 )
 
 data class DsChatResponse(
