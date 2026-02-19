@@ -1,5 +1,6 @@
 package com.example.aichalengeapp.vm
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.aichalengeapp.data.MessageUi
@@ -9,6 +10,7 @@ import jakarta.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import okhttp3.logging.HttpLoggingInterceptor
 import java.util.UUID
 
 @HiltViewModel
@@ -22,35 +24,32 @@ class ChatViewModel @Inject constructor(
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading
 
-    fun send(text: String, controlled: Boolean) {
+    fun send(text: String) {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return
 
-        _messages.value = _messages.value + MessageUi(
-            id = UUID.randomUUID().toString(),
-            text = trimmed,
-            isUser = true
-        )
+        _messages.value += MessageUi(
+                    id = UUID.randomUUID().toString(),
+                    text = trimmed,
+                    isUser = true
+                )
 
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                val reply = if (controlled) {
-                    repo.askControlled(text)
-                } else {
-                    repo.ask(text)
-                }
-                _messages.value = _messages.value + MessageUi(
-                    id = UUID.randomUUID().toString(),
-                    text = reply,
-                    isUser = false
-                )
+                val reply = repo.ask(text)
+                Log.i("reply=", reply)
+                _messages.value += MessageUi(
+                                    id = UUID.randomUUID().toString(),
+                                    text = reply,
+                                    isUser = false
+                                )
             } catch (e: Exception) {
-                _messages.value = _messages.value + MessageUi(
-                    id = UUID.randomUUID().toString(),
-                    text = "Ошибка: ${e.message}",
-                    isUser = false
-                )
+                _messages.value += MessageUi(
+                                    id = UUID.randomUUID().toString(),
+                                    text = "Ошибка: ${e.message}",
+                                    isUser = false
+                                )
             } finally {
                 _isLoading.value = false
             }

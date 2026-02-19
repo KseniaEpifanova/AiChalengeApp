@@ -39,7 +39,6 @@ fun ChatScreen(
     val messages by viewModel.messages.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     var input by remember { mutableStateOf("") }
-    var controlled by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("AI Assistant") }) }
@@ -50,20 +49,6 @@ fun ChatScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                Text("Контроль формата")
-                Spacer(modifier = Modifier.width(8.dp))
-                Switch(
-                    checked = controlled,
-                    onCheckedChange = { controlled = it }
-                )
-            }
-
-
             LazyColumn(
                 modifier = Modifier.weight(1f),
                 contentPadding = PaddingValues(12.dp)
@@ -102,7 +87,7 @@ fun ChatScreen(
                 Button(
                     onClick = {
                         if (input.isNotBlank()) {
-                            viewModel.send(input, controlled)
+                            viewModel.send(input)
                             input = ""
                         }
                     },

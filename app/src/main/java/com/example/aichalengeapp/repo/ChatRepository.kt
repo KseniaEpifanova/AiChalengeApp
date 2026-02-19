@@ -17,25 +17,4 @@ class ChatRepository @Inject constructor(
         return api.chat(req).choices.first().message.content
     }
 
-    suspend fun askControlled(text: String): String {
-        val system = """
-Return answer in JSON format:
-{
-  "summary": "1 sentence",
-  "answer": "max 80 words"
-}
-End with <END>
-""".trimIndent()
-
-        val request = DsChatRequest(
-            messages = listOf(
-                DsMessage("system", system),
-                DsMessage("user", text)
-            ),
-            max_tokens = 150,
-            stop = listOf("<END>")
-        )
-
-        return api.chat(request).choices.first().message.content
-    }
 }
