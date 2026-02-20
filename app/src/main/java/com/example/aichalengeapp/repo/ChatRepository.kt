@@ -7,12 +7,18 @@ import jakarta.inject.Inject
 class ChatRepository @Inject constructor(
     private val api: ChatApi
 ) {
-    suspend fun ask(userText: String): String {
+    suspend fun ask(
+        userText: String,
+        temperature: Double,
+        maxTokens: Int
+    ): String {
         val req = DsChatRequest(
             messages = listOf(
                 DsMessage("system", "You are a helpful assistant."),
                 DsMessage("user", userText)
-            )
+            ),
+            temperature = temperature,
+            max_tokens = maxTokens
         )
         return api.chat(req).choices.first().message.content
     }
