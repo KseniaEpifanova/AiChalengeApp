@@ -1,58 +1,99 @@
 package com.example.aichalengeapp.vm
 
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.aichalengeapp.agent.ChatAgent
-import com.example.aichalengeapp.data.MessageUi
-import com.example.aichalengeapp.repo.ChatRepository
+import com.example.aichalengeapp.data.AgentMessage
+import com.example.aichalengeapp.data.AgentRole
 import dagger.hilt.android.lifecycle.HiltViewModel
 import jakarta.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import java.util.UUID
+import kotlinx.coroutines.flow.asStateFlow
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
-    private val repo: ChatRepository
+    private val agent: ChatAgent
 ) : ViewModel() {
 
-    private val _messages = MutableStateFlow<List<MessageUi>>(emptyList())
-    val messages: StateFlow<List<MessageUi>> = _messages
+    data class UiMessage(
+        val id: Long,
+        val text: String,
+        val isUser: Boolean
+    )
+
+    private val _messages = MutableStateFlow<List<UiMessage>>(emptyList())
+    val messages: StateFlow<List<UiMessage>> = _messages.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
-    val isLoading: StateFlow<Boolean> = _isLoading
-    private val agent = ChatAgent(repo)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            agent.init()
+            val history = agent.getHistory()
+            restoreUiFromHistory(history)
+        }
+    }
 
     fun send(text: String) {
         val trimmed = text.trim()
-        if (trimmed.isEmpty()) return
-
-        _messages.value += MessageUi(
-                    id = UUID.randomUUID().toString(),
-                    text = trimmed,
-                    isUser = true
-                )
+        if (trimmed.isEmpty() || _isLoading.value) return
 
         viewModelScope.launch {
             _isLoading.value = true
+
+            appendUiMessage(
+                text = trimmed,
+                isUser = true
+            )
+
             try {
-                val reply = agent.handleUserMessage(text)
-                _messages.value += MessageUi(
-                                    id = UUID.randomUUID().toString(),
-                                    text = reply,
-                                    isUser = false
-                                )
-            } catch (e: Exception) {
-                _messages.value += MessageUi(
-                                    id = UUID.randomUUID().toString(),
-                                    text = "Ошибка: ${e.message}",
-                                    isUser = false
-                                )
+                val answer = agent.handleUserMessage(trimmed)
+
+                appendUiMessage(
+                    text = answer,
+                    isUser = false
+                )
+            } catch (t: Throwable) {
+                appendUiMessage(
+                    text = "⚠️ Error: ${t.message ?: t::class.java.simpleName}",
+                    isUser = false
+                )
             } finally {
                 _isLoading.value = false
             }
         }
+    }
+
+    fun resetChat() {
+        viewModelScope.launch {
+            agent.reset()
+            _messages.value = emptyList()
+        }
+    }
+
+    private fun restoreUiFromHistory(history: List<AgentMessage>) {
+        val ui = history
+            .filter { it.role != AgentRole.SYSTEM }
+            .map { msg ->
+                UiMessage(
+                    id = msg.timestampMs,
+                    text = msg.content,
+                    isUser = msg.role == AgentRole.USER
+                )
+            }
+
+        _messages.value = ui
+    }
+
+    private fun appendUiMessage(text: String, isUser: Boolean) {
+        val newMessage = UiMessage(
+            id = System.currentTimeMillis(),
+            text = text,
+            isUser = isUser
+        )
+        _messages.value += newMessage
     }
 }

@@ -55,6 +55,7 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.androidx.material.icons.extended)
 
     implementation(libs.retrofit)
     implementation(libs.retrofit.converter.moshi)
@@ -68,6 +69,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
+    implementation(libs.androidx.datastore.preferences)
 
     implementation(libs.androidx.hilt.navigation.compose)
     testImplementation(libs.junit)
