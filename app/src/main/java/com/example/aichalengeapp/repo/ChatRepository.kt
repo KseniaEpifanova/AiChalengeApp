@@ -1,26 +1,36 @@
 package com.example.aichalengeapp.repo
 
+import com.example.aichalengeapp.agent.LlmRepository
+import com.example.aichalengeapp.data.AgentMessage
+import com.example.aichalengeapp.data.AgentRole
 import com.example.aichalengeapp.data.DsChatRequest
 import com.example.aichalengeapp.data.DsMessage
-import jakarta.inject.Inject
+import javax.inject.Inject
 
 class ChatRepository @Inject constructor(
     private val api: ChatApi
-) {
-    suspend fun ask(
-        userText: String,
-        temperature: Double,
-        maxTokens: Int
-    ): String {
-        val req = DsChatRequest(
-            messages = listOf(
-                DsMessage("system", "You are a helpful assistant."),
-                DsMessage("user", userText)
-            ),
-            temperature = temperature,
-            max_tokens = maxTokens
+) : LlmRepository {
+
+    override suspend fun ask(messages: List<AgentMessage>): String {
+        val dsMessages = messages.map { it.toDsMessage() }
+
+        val resp = api.chat(
+            DsChatRequest(
+                model = "deepseek-chat",
+                messages = dsMessages,
+                temperature = 0.3
+            )
         )
-        return api.chat(req).choices.first().message.content
+
+        return resp.choices.firstOrNull()?.message?.content.orEmpty()
     }
 
+    private fun AgentMessage.toDsMessage(): DsMessage {
+        val role = when (this.role) {
+            AgentRole.SYSTEM -> "system"
+            AgentRole.USER -> "user"
+            AgentRole.ASSISTANT -> "assistant"
+        }
+        return DsMessage(role, this.content)
+    }
 }

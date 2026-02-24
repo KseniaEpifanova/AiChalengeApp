@@ -1,37 +1,19 @@
 package com.example.aichalengeapp.ui
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.aichalengeapp.vm.ChatViewModel
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -40,79 +22,73 @@ fun ChatScreen(
 ) {
     val messages by viewModel.messages.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
-    var input by remember { mutableStateOf("") }
-    var temperature by rememberSaveable { mutableStateOf(0.7f) }
+
+    var input by rememberSaveable { mutableStateOf("") }
+
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(messages.size, isLoading) {
+        if (messages.isNotEmpty()) {
+            scope.launch {
+                listState.animateScrollToItem(messages.lastIndex)
+            }
+        }
+    }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("AI Assistant") }) }
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = {
+                    Text(
+                        "AI Assistant",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            )
+        }
     ) { innerPadding ->
 
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .background(MaterialTheme.colorScheme.surface)
         ) {
             LazyColumn(
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(12.dp)
-            ) {
-                items(messages) { message ->
-                    MessageBubble(message)
-                }
-            }
-            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                    .weight(1f),
+                state = listState,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text("Temperature: ${"%.2f".format(temperature)}")
-                Slider(
-                    value = temperature,
-                    onValueChange = { temperature = it },
-                    valueRange = 0f..2f,
-                    steps = 19,
-                    enabled = !isLoading
-                )
-            }
-
-            if (isLoading) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    CircularProgressIndicator()
+                items(messages) { msg ->
+                    MessageBubble(
+                        text = msg.text,
+                        isUser = msg.isUser
+                    )
+                }
+                if (isLoading) {
+                    item {
+                        TypingBubble()
+                    }
                 }
             }
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(8.dp)
-            ) {
-                TextField(
-                    value = input,
-                    onValueChange = { input = it },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("Type a message...") },
-                    enabled = !isLoading
-                )
-
-                Spacer(modifier = Modifier.width(8.dp))
-
-                Button(
-                    onClick = {
-                        if (input.isNotBlank()) {
-                            viewModel.send(input, temperature.toDouble())
-                            input = ""
-                        }
-                    },
-                    enabled = !isLoading
-                ) {
-                    Text("Send")
-                }
-            }
+            InputBar(
+                value = input,
+                onValueChange = { input = it },
+                onSend = {
+                    val trimmed = input.trim()
+                    if (trimmed.isNotEmpty()) {
+                        viewModel.send(trimmed)
+                        input = ""
+                    }
+                },
+                enabled = !isLoading
+            )
         }
     }
 }

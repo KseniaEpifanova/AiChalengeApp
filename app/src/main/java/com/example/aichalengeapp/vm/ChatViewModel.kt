@@ -3,6 +3,7 @@ package com.example.aichalengeapp.vm
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.aichalengeapp.agent.ChatAgent
 import com.example.aichalengeapp.data.MessageUi
 import com.example.aichalengeapp.repo.ChatRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -10,7 +11,6 @@ import jakarta.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import okhttp3.logging.HttpLoggingInterceptor
 import java.util.UUID
 
 @HiltViewModel
@@ -23,8 +23,9 @@ class ChatViewModel @Inject constructor(
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading
+    private val agent = ChatAgent(repo)
 
-    fun send(text: String, temperature: Double) {
+    fun send(text: String) {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return
 
@@ -37,8 +38,7 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                val reply = repo.ask(text, temperature, maxTokens = 2000)
-                Log.i("reply=", reply)
+                val reply = agent.handleUserMessage(text)
                 _messages.value += MessageUi(
                                     id = UUID.randomUUID().toString(),
                                     text = reply,
