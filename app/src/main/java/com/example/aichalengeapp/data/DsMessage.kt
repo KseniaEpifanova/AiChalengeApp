@@ -14,7 +14,13 @@ data class DsChatRequest(
 )
 
 data class DsChatResponse(
-    val choices: List<Choice>
+    val choices: List<Choice>,
+    val usage: Usage? = null
 ) {
     data class Choice(val message: DsMessage)
+    data class Usage(
+        val prompt_tokens: Int,
+        val completion_tokens: Int,
+        val total_tokens: Int
+    )
 }

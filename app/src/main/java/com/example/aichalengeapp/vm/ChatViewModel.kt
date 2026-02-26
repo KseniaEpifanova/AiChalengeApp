@@ -3,6 +3,7 @@ package com.example.aichalengeapp.vm
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.aichalengeapp.agent.ChatAgent
+import com.example.aichalengeapp.agent.ContextOverflowException
 import com.example.aichalengeapp.data.AgentMessage
 import com.example.aichalengeapp.data.AgentRole
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -50,12 +51,21 @@ class ChatViewModel @Inject constructor(
             )
 
             try {
-                val answer = agent.handleUserMessage(trimmed)
+                try {
+                    val reply = agent.handleUserMessage(trimmed)
 
-                appendUiMessage(
-                    text = answer,
-                    isUser = false
-                )
+                    appendUiMessage(reply.text, isUser = false)
+
+                    val m = reply.metrics
+                    val cost = m.estimatedCostUsd?.let { String.format(java.util.Locale.US, "%.6f", it) } ?: "—"
+
+                    appendUiMessage(
+                        text = "📊 Tokens: user≈${m.estimatedUserTokens}, history≈${m.estimatedHistoryTokens}, prompt≈${m.estimatedPromptTokens} | actual prompt=${m.actualPromptTokens ?: "—"}, completion=${m.actualCompletionTokens ?: "—"} | cost≈$$cost",
+                        isUser = false
+                    )
+                } catch (e: ContextOverflowException) {
+                    appendUiMessage("🚫 ${e.message}", isUser = false)
+                }
             } catch (t: Throwable) {
                 appendUiMessage(
                     text = "⚠️ Error: ${t.message ?: t::class.java.simpleName}",
