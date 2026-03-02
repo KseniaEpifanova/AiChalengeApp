@@ -1,6 +1,5 @@
 package com.example.aichalengeapp.ui
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -11,21 +10,25 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -45,39 +48,32 @@ fun ChatScreen(
 ) {
     val messages by viewModel.messages.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
-    val compressionEnabled by viewModel.compressionEnabled.collectAsState()
+    val strategy by viewModel.strategy.collectAsState()
 
     var input by remember { mutableStateOf("") }
     var showClearDialog by rememberSaveable { mutableStateOf(false) }
 
+    var strategyMenuExpanded by remember { mutableStateOf(false) }
+    var branchMenuExpanded by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    val factsJson by viewModel.factsJson.collectAsState()
+
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.lastIndex)
+        }
+    }
+
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
+            TopAppBar(
                 title = { Text("AI Assistant") },
                 actions = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(end = 8.dp)
-                    ) {
-                        Text(
-                            text = "Compression",
-                            modifier = Modifier.padding(end = 6.dp)
-                        )
-                        Switch(
-                            checked = compressionEnabled,
-                            onCheckedChange = { viewModel.setCompressionEnabled(it) },
-                            enabled = !isLoading
-                        )
-                    }
-
                     IconButton(
                         onClick = { showClearDialog = true },
                         enabled = !isLoading && messages.isNotEmpty()
                     ) {
-                        Icon(
-                            imageVector = Icons.Filled.DeleteSweep,
-                            contentDescription = "New chat"
-                        )
+                        Icon(Icons.Filled.DeleteSweep, contentDescription = "New chat")
                     }
                 }
             )
@@ -90,33 +86,140 @@ fun ChatScreen(
                 .padding(innerPadding)
         ) {
 
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(12.dp)
+            // Strategy header
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                items(messages) { msg ->
-                    MessageBubble(
-                        text = msg.text,
-                        isUser = msg.isUser
+                OutlinedButton(
+                    onClick = { strategyMenuExpanded = true },
+                    enabled = !isLoading
+                ) {
+                    Text("Strategy: ${strategy.type}")
+                }
+
+                DropdownMenu(
+                    expanded = strategyMenuExpanded,
+                    onDismissRequest = { strategyMenuExpanded = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("SLIDING") },
+                        onClick = {
+                            strategyMenuExpanded = false
+                            viewModel.setStrategyType(ChatViewModel.StrategyTypeUi.SLIDING)
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("FACTS") },
+                        onClick = {
+                            strategyMenuExpanded = false
+                            viewModel.setStrategyType(ChatViewModel.StrategyTypeUi.FACTS)
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("BRANCHING") },
+                        onClick = {
+                            strategyMenuExpanded = false
+                            viewModel.setStrategyType(ChatViewModel.StrategyTypeUi.BRANCHING)
+                        }
                     )
                 }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                Text("Tail: ${strategy.tailN}")
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Slider(
+                    value = strategy.tailN.toFloat(),
+                    onValueChange = { viewModel.setTailN(it.toInt()) },
+                    valueRange = 4f..60f,
+                    steps = 30,
+                    enabled = !isLoading,
+                    modifier = Modifier.weight(1f)
+                )
             }
 
-            if (isLoading) {
+            // Branching controls (only visible in branching mode)
+            if (strategy.type == ChatViewModel.StrategyTypeUi.BRANCHING) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.Center
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    CircularProgressIndicator()
+                    OutlinedButton(
+                        onClick = { viewModel.setCheckpoint() },
+                        enabled = !isLoading
+                    ) { Text("Set checkpoint") }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    OutlinedButton(
+                        onClick = { viewModel.createBranch("A") },
+                        enabled = !isLoading
+                    ) { Text("Create A") }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    OutlinedButton(
+                        onClick = { viewModel.createBranch("B") },
+                        enabled = !isLoading
+                    ) { Text("Create B") }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    OutlinedButton(
+                        onClick = { branchMenuExpanded = true },
+                        enabled = !isLoading && strategy.branches.isNotEmpty()
+                    ) {
+                        Text("Branch: ${strategy.activeBranchId ?: "—"}")
+                    }
+
+                    DropdownMenu(
+                        expanded = branchMenuExpanded,
+                        onDismissRequest = { branchMenuExpanded = false }
+                    ) {
+                        strategy.branches.forEach { id ->
+                            DropdownMenuItem(
+                                text = { Text(id) },
+                                onClick = {
+                                    branchMenuExpanded = false
+                                    viewModel.switchBranch(id)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (strategy.type == ChatViewModel.StrategyTypeUi.FACTS) {
+                FactsPanel(
+                    factsJson = factsJson,
+                    enabled = !isLoading
+                )
+            }
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(12.dp)
+            ) {
+                items(messages, key = { it.id }) { msg ->
+                    MessageBubble(
+                        message = msg,
+                        onToggleExpand = viewModel::toggleExpand
+                    )
                 }
             }
 
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(8.dp)
+                    .padding(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 TextField(
                     value = input,

@@ -1,156 +1,110 @@
 package com.example.aichalengeapp.ui
 
-import androidx.compose.foundation.background
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Send
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.Icon
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.example.aichalengeapp.vm.ChatViewModel
 
 @Composable
 fun MessageBubble(
-    text: String,
-    isUser: Boolean
+    message: ChatViewModel.UiMessage,
+    onToggleExpand: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+    collapsedLines: Int = 8
 ) {
+    val cfg = LocalConfiguration.current
+    val maxBubbleWidth = (cfg.screenWidthDp * 0.85f).dp
+
     val bubbleShape = RoundedCornerShape(
         topStart = 18.dp,
         topEnd = 18.dp,
-        bottomStart = if (isUser) 18.dp else 6.dp,
-        bottomEnd = if (isUser) 6.dp else 18.dp
+        bottomStart = if (message.isUser) 18.dp else 6.dp,
+        bottomEnd = if (message.isUser) 6.dp else 18.dp
     )
 
-    val bubbleColor = if (isUser) {
-        MaterialTheme.colorScheme.primary
+    val containerColor = if (message.isUser) {
+        MaterialTheme.colorScheme.primaryContainer
     } else {
-        MaterialTheme.colorScheme.surfaceContainerHighest
+        MaterialTheme.colorScheme.surfaceVariant
     }
 
-    val textColor = if (isUser) {
-        MaterialTheme.colorScheme.onPrimary
+    val contentColor = if (message.isUser) {
+        MaterialTheme.colorScheme.onPrimaryContainer
     } else {
-        MaterialTheme.colorScheme.onSurface
+        MaterialTheme.colorScheme.onSurfaceVariant
     }
+
+    val expanded = message.isExpanded
+
+    // ВАЖНО: определяем, был ли текст "обрезан" в свернутом виде
+    var hasOverflowWhenCollapsed by remember(message.id) { mutableStateOf(false) }
+
+    // Кнопка должна показываться:
+    // - если текст был обрезан (в свернутом виде) — показываем "Показать ещё"
+    // - если раскрыт — показываем "Свернуть" (даже если overflow сейчас false)
+    val canToggle = hasOverflowWhenCollapsed || expanded
 
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
-    ) {
-        Box(
-            modifier = Modifier
-                .widthIn(max = 320.dp)
-                .clip(bubbleShape)
-                .background(bubbleColor)
-                .padding(horizontal = 14.dp, vertical = 10.dp)
-        ) {
-            Text(
-                text = text,
-                color = textColor,
-                style = MaterialTheme.typography.bodyMedium
-            )
-        }
-    }
-}
-
-@Composable
-fun TypingBubble() {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Start
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        horizontalArrangement = if (message.isUser) Arrangement.End else Arrangement.Start
     ) {
         Surface(
-            shape = RoundedCornerShape(18.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHighest
+            color = containerColor,
+            contentColor = contentColor,
+            shape = bubbleShape,
+            shadowElevation = 1.dp,
+            modifier = Modifier.widthIn(max = maxBubbleWidth)
         ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                    .animateContentSize()
             ) {
-                CircularProgressIndicator(
-                    strokeWidth = 2.dp,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(Modifier.width(10.dp))
                 Text(
-                    text = "Assistant is typing…",
+                    text = message.text,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface
+                    softWrap = true,
+                    maxLines = if (expanded) Int.MAX_VALUE else collapsedLines,
+                    overflow = if (expanded) TextOverflow.Clip else TextOverflow.Ellipsis,
+                    onTextLayout = { result ->
+                        if (!expanded) {
+                            hasOverflowWhenCollapsed = result.hasVisualOverflow
+                        }
+                    }
                 )
-            }
-        }
-    }
-}
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun InputBar(
-    value: String,
-    onValueChange: (String) -> Unit,
-    onSend: () -> Unit,
-    enabled: Boolean
-) {
-    Surface(
-        tonalElevation = 3.dp,
-        shadowElevation = 3.dp
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .imePadding()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            TextField(
-                value = value,
-                onValueChange = onValueChange,
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("Type a message…") },
-                enabled = enabled,
-                singleLine = false,
-                maxLines = 4,
-                shape = RoundedCornerShape(16.dp),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest
-                )
-            )
-
-            Spacer(Modifier.width(10.dp))
-
-            FilledIconButton(
-                onClick = onSend,
-                enabled = enabled && value.isNotBlank(),
-                shape = CircleShape
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Send,
-                    contentDescription = "Send"
-                )
+                if (canToggle) {
+                    TextButton(
+                        onClick = { onToggleExpand(message.id) },
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
+                        Text(
+                            text = if (expanded) "Свернуть" else "Показать ещё",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+                }
             }
         }
     }

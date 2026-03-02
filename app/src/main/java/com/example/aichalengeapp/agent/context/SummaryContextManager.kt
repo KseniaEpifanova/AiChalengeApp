@@ -12,7 +12,7 @@ class SummaryContextManager @Inject constructor(
     private val keepLastN = 12
     private val summarizeBatchSize = 10
 
-    override suspend fun prepare(snapshot: MemorySnapshot): ContextPlan {
+    override suspend fun prepare(snapshot: MemorySnapshot): OldContextPlan {
         val all = snapshot.messages.filter { it.role != AgentRole.SYSTEM }
         val summarizedCount = snapshot.summarizedCount
 
@@ -35,14 +35,14 @@ class SummaryContextManager @Inject constructor(
                 summarizedCount = newSummarizedCount
             )
 
-            return ContextPlan(
+            return OldContextPlan(
                 summary = newSummary,
                 tailMessages = tail,
                 updatedSnapshot = updated
             )
         }
 
-        return ContextPlan(
+        return OldContextPlan(
             summary = snapshot.summary,
             tailMessages = tail,
             updatedSnapshot = null
