@@ -8,6 +8,10 @@ import com.example.aichalengeapp.agent.memory.AgentMemoryStore
 import com.example.aichalengeapp.agent.memory.ChatMemoryStore
 import com.example.aichalengeapp.agent.memory.DataStoreAgentMemoryStore
 import com.example.aichalengeapp.agent.memory.DataStoreChatMemoryStore
+import com.example.aichalengeapp.agent.memory.DataStoreLongTermMemoryStore
+import com.example.aichalengeapp.agent.memory.DataStoreWorkingMemoryStore
+import com.example.aichalengeapp.agent.memory.LongTermMemoryStore
+import com.example.aichalengeapp.agent.memory.WorkingMemoryStore
 import com.example.aichalengeapp.agent.summary.LlmSummarizer
 import com.example.aichalengeapp.agent.summary.Summarizer
 import dagger.Binds
@@ -20,18 +24,31 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 abstract class AgentBindingsModule {
 
-    @Binds @Singleton
+    @Binds
+    @Singleton
     abstract fun bindMemoryOldStore(impl: DataStoreChatMemoryStore): ChatMemoryStore
 
-    @Binds @Singleton
+    @Binds
+    @Singleton
     abstract fun bindSummarizer(impl: LlmSummarizer): Summarizer
 
-    @Binds @Singleton
+    @Binds
+    @Singleton
     abstract fun bindContextManager(impl: SummaryContextManager): ContextManager
 
-    @Binds @Singleton
+    @Binds
+    @Singleton
     abstract fun bindMemoryStore(impl: DataStoreAgentMemoryStore): AgentMemoryStore
 
-    @Binds @Singleton
+    @Binds
+    @Singleton
     abstract fun bindFactsUpdater(impl: LlmFactsUpdater): FactsUpdater
+
+    @Binds
+    @Singleton
+    abstract fun bindWorkingMemoryStore(impl: DataStoreWorkingMemoryStore): WorkingMemoryStore
+
+    @Binds
+    @Singleton
+    abstract fun bindLongTermMemoryStore(impl: DataStoreLongTermMemoryStore): LongTermMemoryStore
 }

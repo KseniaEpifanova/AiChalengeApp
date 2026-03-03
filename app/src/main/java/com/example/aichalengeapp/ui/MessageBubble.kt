@@ -1,22 +1,13 @@
 package com.example.aichalengeapp.ui
 
 import androidx.compose.animation.animateContentSize
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
@@ -55,13 +46,8 @@ fun MessageBubble(
 
     val expanded = message.isExpanded
 
-    // ВАЖНО: определяем, был ли текст "обрезан" в свернутом виде
-    var hasOverflowWhenCollapsed by remember(message.id) { mutableStateOf(false) }
-
-    // Кнопка должна показываться:
-    // - если текст был обрезан (в свернутом виде) — показываем "Показать ещё"
-    // - если раскрыт — показываем "Свернуть" (даже если overflow сейчас false)
-    val canToggle = hasOverflowWhenCollapsed || expanded
+    var lineCount by remember(message.id) { mutableIntStateOf(0) }
+    val canToggle = lineCount > collapsedLines
 
     Row(
         modifier = modifier
@@ -87,22 +73,17 @@ fun MessageBubble(
                     softWrap = true,
                     maxLines = if (expanded) Int.MAX_VALUE else collapsedLines,
                     overflow = if (expanded) TextOverflow.Clip else TextOverflow.Ellipsis,
-                    onTextLayout = { result ->
-                        if (!expanded) {
-                            hasOverflowWhenCollapsed = result.hasVisualOverflow
-                        }
-                    }
+                    onTextLayout = { result -> lineCount = result.lineCount }
                 )
 
                 if (canToggle) {
+                    Spacer(modifier = Modifier.height(4.dp))
                     TextButton(
                         onClick = { onToggleExpand(message.id) },
+                        contentPadding = PaddingValues(0.dp),
                         modifier = Modifier.align(Alignment.End)
                     ) {
-                        Text(
-                            text = if (expanded) "Свернуть" else "Показать ещё",
-                            style = MaterialTheme.typography.labelLarge
-                        )
+                        Text(if (expanded) "Свернуть" else "Показать ещё")
                     }
                 }
             }

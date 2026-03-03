@@ -2,14 +2,9 @@ package com.example.aichalengeapp.agent.context
 
 import com.example.aichalengeapp.data.AgentMessage
 
-
 data class AgentMemoryState(
     val history: List<AgentMessage> = emptyList(),
-
-    // Sticky Facts (Key-Value memory) — пока строкой JSON
     val factsJson: String = "",
-
-    // Branching — base + ветки
     val branching: BranchingState = BranchingState()
 )
 

@@ -12,7 +12,8 @@ data class TokenMetrics(
 
 data class AgentReply(
     val text: String,
-    val metrics: TokenMetrics
+    val metrics: TokenMetrics,
+    val debugLabel: String = ""
 )
 
 class ContextOverflowException(message: String) : IllegalStateException(message)
