@@ -12,6 +12,8 @@ import com.example.aichalengeapp.agent.memory.DataStoreLongTermMemoryStore
 import com.example.aichalengeapp.agent.memory.DataStoreWorkingMemoryStore
 import com.example.aichalengeapp.agent.memory.LongTermMemoryStore
 import com.example.aichalengeapp.agent.memory.WorkingMemoryStore
+import com.example.aichalengeapp.agent.profile.DataStoreUserProfileStore
+import com.example.aichalengeapp.agent.profile.UserProfileStore
 import com.example.aichalengeapp.agent.summary.LlmSummarizer
 import com.example.aichalengeapp.agent.summary.Summarizer
 import dagger.Binds
@@ -51,4 +53,8 @@ abstract class AgentBindingsModule {
     @Binds
     @Singleton
     abstract fun bindLongTermMemoryStore(impl: DataStoreLongTermMemoryStore): LongTermMemoryStore
+
+    @Binds
+    @Singleton
+    abstract fun bindUserProfileStore(impl: DataStoreUserProfileStore): UserProfileStore
 }

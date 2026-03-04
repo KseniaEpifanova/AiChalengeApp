@@ -7,6 +7,8 @@ import com.example.aichalengeapp.agent.facts.FactsUpdater
 import com.example.aichalengeapp.agent.memory.AgentMemoryStore
 import com.example.aichalengeapp.agent.memory.LongTermMemoryStore
 import com.example.aichalengeapp.agent.memory.WorkingMemoryStore
+import com.example.aichalengeapp.agent.profile.UserProfile
+import com.example.aichalengeapp.agent.profile.UserProfileStore
 import com.example.aichalengeapp.data.AgentMessage
 import com.example.aichalengeapp.data.AgentRole
 import com.example.aichalengeapp.repo.ChatRepository
@@ -19,6 +21,7 @@ class ChatAgent @Inject constructor(
     private val shortTermStore: AgentMemoryStore,
     private val workingStore: WorkingMemoryStore,
     private val longTermStore: LongTermMemoryStore,
+    private val userProfileStore: UserProfileStore,
     private val selector: ContextStrategySelector,
     private val tokenEstimator: TokenEstimator,
     private val factsUpdater: FactsUpdater
@@ -26,10 +29,12 @@ class ChatAgent @Inject constructor(
     private val mutex = Mutex()
 
     private var shortTerm: AgentMemoryState = AgentMemoryState()
-    private var initialized = false
-
     private var workingJson: String = ""
     private var longTermJson: String = ""
+
+    private var userProfile: UserProfile = UserProfile()
+
+    private var initialized = false
 
     private val systemPromptBase = "You are a helpful assistant."
     private val maxOutputTokens = 512
@@ -39,6 +44,7 @@ class ChatAgent @Inject constructor(
         shortTerm = shortTermStore.load()
         workingJson = workingStore.loadJson()
         longTermJson = longTermStore.loadJson()
+        userProfile = userProfileStore.load()
         initialized = true
     }
 
@@ -47,27 +53,30 @@ class ChatAgent @Inject constructor(
         shortTerm = AgentMemoryState()
         workingJson = ""
         longTermJson = ""
+        userProfile = UserProfile()
         shortTermStore.clear()
         workingStore.clear()
         longTermStore.clear()
+        userProfileStore.clear()
     }
 
-    suspend fun resetShortTermOnly() = mutex.withLock {
+    suspend fun getUserProfile(): UserProfile = mutex.withLock {
         if (!initialized) init()
-        shortTerm = AgentMemoryState()
-        shortTermStore.clear()
+        userProfile = userProfileStore.load()
+        userProfile
     }
 
-    suspend fun clearWorkingOnly() = mutex.withLock {
+    suspend fun saveUserProfile(profile: UserProfile) = mutex.withLock {
         if (!initialized) init()
-        workingJson = ""
-        workingStore.clear()
+        userProfile = profile
+        userProfileStore.save(profile)
+        userProfile = userProfileStore.load()
     }
 
-    suspend fun clearLongTermOnly() = mutex.withLock {
+    suspend fun clearUserProfile() = mutex.withLock {
         if (!initialized) init()
-        longTermJson = ""
-        longTermStore.clear()
+        userProfile = UserProfile()
+        userProfileStore.clear()
     }
 
     suspend fun getHistory(): List<AgentMessage> = mutex.withLock {
@@ -101,58 +110,42 @@ class ChatAgent @Inject constructor(
             return AgentReply("", TokenMetrics(0, 0, 0, null, null, null, null))
         }
 
-        // memory commands (без LLM)
-        parseMemoryCommand(trimmed)?.let { text ->
-            return AgentReply(
-                text = text,
-                metrics = TokenMetrics(
-                    estimatedUserTokens = tokenEstimator.estimateTokens(trimmed),
-                    estimatedHistoryTokens = tokenEstimator.estimateTokens(shortTerm.history),
-                    estimatedPromptTokens = 0,
-                    actualPromptTokens = null,
-                    actualCompletionTokens = null,
-                    actualTotalTokens = null,
-                    estimatedCostUsd = null
-                )
-            )
-        }
+        userProfile = userProfileStore.load()
 
-        // short-term user append
         appendUserMessage(strategyConfig, trimmed)
-
-        // facts strategy (facts остаются в short-term, это ок)
         if (strategyConfig is StrategyConfig.StickyFacts) {
             val updatedFacts = factsUpdater.updateFacts(shortTerm.factsJson, trimmed)
             shortTerm = shortTerm.copy(factsJson = updatedFacts)
         }
         shortTermStore.save(shortTerm)
 
-        // build context plan
         val strategy = selector.select(strategyConfig)
         val plan = strategy.build(shortTerm, strategyConfig)
 
-        // system prompt with layers
+        val profileDirective = buildProfileDirective(userProfile)
+
         val systemPrompt = buildSystemPromptWithMemoryLayers(
             base = systemPromptBase,
+            profileDirective = profileDirective,
             longTerm = longTermJson,
             working = workingJson
         )
 
         val llmMessages = buildList {
             add(AgentMessage(AgentRole.SYSTEM, systemPrompt))
+
+            add(AgentMessage(AgentRole.USER, profileDirective))
+
             addAll(plan.messagesForLlm)
         }
 
-        // token estimate
         val estimatedPrompt = tokenEstimator.estimateTokens(llmMessages)
         val estimatedUser = tokenEstimator.estimateTokens(trimmed)
         val estimatedHistory = (estimatedPrompt - estimatedUser).coerceAtLeast(0)
 
-        // call LLM
         val result = llmRepository.ask(llmMessages, maxOutputTokens = maxOutputTokens)
         val answer = result.text.trim()
 
-        // short-term assistant append
         appendAssistantMessage(strategyConfig, answer)
         shortTermStore.save(shortTerm)
 
@@ -176,69 +169,24 @@ class ChatAgent @Inject constructor(
         )
     }
 
-    private suspend fun parseMemoryCommand(text: String): String? {
-        if (!text.startsWith("/")) return null
-        val lower = text.lowercase()
+    private fun buildProfileDirective(profile: UserProfile): String {
+        val style = profile.style.trim().ifBlank { "Нейтральный, дружелюбный." }
+        val format = profile.format.trim().ifBlank { "Коротко и по делу, при необходимости списком." }
+        val constraints = profile.constraints.trim().ifBlank { "Если не уверен — скажи, что не уверен." }
 
-        return when {
-            lower.startsWith("/work ") -> {
-                val kv = text.removePrefix("/work").trim()
-                if (kv.isBlank()) return "⚠️ Usage: /work key=value"
-                workingJson = mergeKeyValueIntoJson(workingJson, kv)
-                workingStore.saveJson(workingJson)
-                "✅ Saved to WORKING memory: $kv"
-            }
+        return """
+            ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ (обязательные правила для ответа):
+            1) Стиль: $style
+            2) Формат: $format
+            3) Ограничения: $constraints
 
-            lower.startsWith("/profile ") -> {
-                val kv = text.removePrefix("/profile").trim()
-                if (kv.isBlank()) return "⚠️ Usage: /profile key=value"
-                longTermJson = mergeKeyValueIntoJson(longTermJson, kv)
-                longTermStore.saveJson(longTermJson)
-                "✅ Saved to LONG-TERM profile: $kv"
-            }
-
-            lower.startsWith("/forget ") -> {
-                when (text.removePrefix("/forget").trim().lowercase()) {
-                    "work", "working" -> {
-                        workingJson = ""
-                        workingStore.clear()
-                        "🧹 Cleared WORKING memory."
-                    }
-                    "profile", "long" -> {
-                        longTermJson = ""
-                        longTermStore.clear()
-                        "🧹 Cleared LONG-TERM profile."
-                    }
-                    "short", "short-term", "chat" -> {
-                        resetShortTermOnly()
-                        "🧹 Cleared SHORT-TERM memory."
-                    }
-                    "all" -> {
-                        resetAll()
-                        "🧹 Cleared ALL memories (short/working/long)."
-                    }
-                    else -> "⚠️ Usage: /forget short | work | profile | all"
-                }
-            }
-
-            lower == "/showmem" -> {
-                val w = if (workingJson.isBlank()) "—" else workingJson
-                val p = if (longTermJson.isBlank()) "—" else longTermJson
-                val s = "history=${shortTerm.history.size}, facts=${if (shortTerm.factsJson.isBlank()) "—" else "yes"}"
-                """
-                🧠 Memory layers:
-                • SHORT: $s
-                • WORKING: $w
-                • LONG-TERM: $p
-                """.trimIndent()
-            }
-
-            else -> "⚠️ Unknown command. Try: /work, /profile, /forget, /showmem"
-        }
+            Выполняй правила профиля автоматически в каждом ответе.
+        """.trimIndent()
     }
 
     private fun buildSystemPromptWithMemoryLayers(
         base: String,
+        profileDirective: String,
         longTerm: String,
         working: String
     ): String {
@@ -248,77 +196,22 @@ class ChatAgent @Inject constructor(
         return """
             $base
 
-            You have 3 memory layers:
-            1) SHORT-TERM: current dialog messages (provided below).
-            2) WORKING: current task state (JSON).
-            3) LONG-TERM: user profile & stable preferences (JSON).
+            $profileDirective
 
-            Use WORKING for current task constraints/decisions.
-            Use LONG-TERM only for stable preferences.
+            MEMORY LAYERS:
+            1) SHORT-TERM: current dialog messages (provided below).
+            2) WORKING: task state (JSON).
+            3) LONG-TERM: stable memory (JSON).
+
             If conflict: WORKING overrides LONG-TERM.
 
-            [LONG_TERM_PROFILE_JSON]
+            [LONG_TERM_JSON]
             $lt
 
-            [WORKING_MEMORY_JSON]
+            [WORKING_JSON]
             $wk
         """.trimIndent()
     }
-
-    private fun mergeKeyValueIntoJson(existingJson: String, kv: String): String {
-        val idx = kv.indexOf('=')
-        if (idx <= 0 || idx == kv.lastIndex) return existingJson
-        val key = kv.substring(0, idx).trim()
-        val value = kv.substring(idx + 1).trim()
-
-        fun q(s: String) = buildString {
-            append('"')
-            s.forEach { ch ->
-                when (ch) {
-                    '\\' -> append("\\\\")
-                    '"' -> append("\\\"")
-                    '\n' -> append("\\n")
-                    '\r' -> append("\\r")
-                    '\t' -> append("\\t")
-                    else -> append(ch)
-                }
-            }
-            append('"')
-        }
-
-        val base = existingJson.trim()
-        val map = LinkedHashMap<String, String>()
-
-        val parsedOk = runCatching {
-            if (base.startsWith("{") && base.endsWith("}")) {
-                val inner = base.removePrefix("{").removeSuffix("}").trim()
-                if (inner.isNotBlank()) {
-                    inner.split(',').map { it.trim() }.forEach { pair ->
-                        val p = pair.split(':', limit = 2)
-                        if (p.size == 2) {
-                            val k = p[0].trim().trim('"')
-                            val v = p[1].trim().trim('"')
-                            if (k.isNotBlank()) map[k] = v
-                        }
-                    }
-                }
-            }
-        }.isSuccess
-
-        if (!parsedOk && base.isNotBlank()) map.clear()
-        map[key] = value
-
-        return buildString {
-            append("{")
-            map.entries.forEachIndexed { i, e ->
-                if (i > 0) append(", ")
-                append(q(e.key)).append(": ").append(q(e.value))
-            }
-            append("}")
-        }
-    }
-
-    // -------- Branching API (оставляю как ты делала раньше) --------
 
     suspend fun setCheckpointAtCurrent() = mutex.withLock {
         if (!initialized) init()
@@ -367,7 +260,12 @@ class ChatAgent @Inject constructor(
                 val branches = shortTerm.branching.branches.toMutableMap()
                 val existing = branches[id]?.messages.orEmpty()
                 branches[id] = com.example.aichalengeapp.agent.context.BranchData(messages = existing + msg)
-                shortTerm = shortTerm.copy(branching = shortTerm.branching.copy(branches = branches, activeBranchId = id))
+                shortTerm = shortTerm.copy(
+                    branching = shortTerm.branching.copy(
+                        branches = branches,
+                        activeBranchId = id
+                    )
+                )
             }
             else -> shortTerm = shortTerm.copy(history = shortTerm.history + msg)
         }
@@ -381,7 +279,12 @@ class ChatAgent @Inject constructor(
                 val branches = shortTerm.branching.branches.toMutableMap()
                 val existing = branches[id]?.messages.orEmpty()
                 branches[id] = com.example.aichalengeapp.agent.context.BranchData(messages = existing + msg)
-                shortTerm = shortTerm.copy(branching = shortTerm.branching.copy(branches = branches, activeBranchId = id))
+                shortTerm = shortTerm.copy(
+                    branching = shortTerm.branching.copy(
+                        branches = branches,
+                        activeBranchId = id
+                    )
+                )
             }
             else -> shortTerm = shortTerm.copy(history = shortTerm.history + msg)
         }
