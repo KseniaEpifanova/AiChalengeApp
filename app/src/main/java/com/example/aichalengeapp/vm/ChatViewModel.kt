@@ -6,14 +6,18 @@ import com.example.aichalengeapp.agent.ChatAgent
 import com.example.aichalengeapp.agent.ContextOverflowException
 import com.example.aichalengeapp.agent.context.StrategyConfig
 import com.example.aichalengeapp.agent.profile.UserProfile
+import com.example.aichalengeapp.agent.task.TaskState
+import com.example.aichalengeapp.agent.task.TaskStage
 import com.example.aichalengeapp.data.AgentMessage
 import com.example.aichalengeapp.data.AgentRole
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Locale
 import javax.inject.Inject
 
@@ -73,21 +77,25 @@ class ChatViewModel @Inject constructor(
     private val _profileDirty = MutableStateFlow(false)
     val profileDirty: StateFlow<Boolean> = _profileDirty.asStateFlow()
 
+    private val _taskState = MutableStateFlow<TaskState?>(null)
+    val taskState: StateFlow<TaskState?> = _taskState.asStateFlow()
+
     private var nextId = 0L
     private fun newId(): Long = ++nextId
 
     init {
         viewModelScope.launch {
-            agent.init()
-            restoreUiFromHistory(agent.getHistory())
+            agentIo { init() }
+            restoreUiFromHistory(agentIo { getHistory() })
             refreshBranches()
 
-            _factsJson.value = agent.getFactsJson()
-            _workingJson.value = agent.getWorkingJson()
-            _longTermJson.value = agent.getLongTermJson()
+            _factsJson.value = agentIo { getFactsJson() }
+            _workingJson.value = agentIo { getWorkingJson() }
+            _longTermJson.value = agentIo { getLongTermJson() }
 
-            _profile.value = agent.getUserProfile()
+            _profile.value = agentIo { getUserProfile() }
             _profileDirty.value = false
+            _taskState.value = agentIo { getTaskState() }
         }
     }
 
@@ -108,8 +116,8 @@ class ChatViewModel @Inject constructor(
 
     fun saveProfile() {
         viewModelScope.launch {
-            agent.saveUserProfile(_profile.value)
-            _profile.value = agent.getUserProfile() // ✅ UI = то, что реально в агенте
+            agentIo { saveUserProfile(_profile.value) }
+            _profile.value = agentIo { getUserProfile() }
             _profileDirty.value = false
             appendUiMessage("✅ Profile saved", isUser = false)
         }
@@ -117,8 +125,8 @@ class ChatViewModel @Inject constructor(
 
     fun clearProfile() {
         viewModelScope.launch {
-            agent.clearUserProfile()
-            _profile.value = agent.getUserProfile()
+            agentIo { clearUserProfile() }
+            _profile.value = agentIo { getUserProfile() }
             _profileDirty.value = false
             appendUiMessage("🧹 Profile cleared", isUser = false)
         }
@@ -139,21 +147,84 @@ class ChatViewModel @Inject constructor(
         if (trimmed.isEmpty() || _isLoading.value) return
 
         viewModelScope.launch {
+            performSend(trimmed, useBootstrapForTask = false)
+        }
+    }
+
+    fun startTask(goal: String) {
+        val trimmed = goal.trim()
+        if (trimmed.isEmpty() || _isLoading.value) return
+        viewModelScope.launch {
+            val state = agentIo { startTask(trimmed) }
+            _taskState.value = state
+            _workingJson.value = agentIo { getWorkingJson() }
+            performSend(trimmed, useBootstrapForTask = true)
+        }
+    }
+
+    fun nextTaskStep() {
+        if (_isLoading.value) return
+        viewModelScope.launch {
+            val oldStage = _taskState.value?.stage
+            val state = agentIo { nextTaskStep() }
+            applyTaskState(state)
+            _workingJson.value = agentIo { getWorkingJson() }
+            if (state == null) {
+                appendUiMessage("ℹ️ No active task", isUser = false)
+            } else if (state.stage == TaskStage.DONE) {
+                appendUiMessage("✅ Task completed", isUser = false)
+            } else if (oldStage != state.stage) {
+                appendUiMessage("➡️ Task stage: $oldStage → ${state.stage}", isUser = false)
+            }
+        }
+    }
+
+    fun pauseTask() {
+        if (_isLoading.value) return
+        viewModelScope.launch {
+            _taskState.value = agentIo { pauseTask() }
+            _workingJson.value = agentIo { getWorkingJson() }
+        }
+    }
+
+    fun resumeTask() {
+        if (_isLoading.value) return
+        viewModelScope.launch {
+            _taskState.value = agentIo { resumeTask() }
+            _workingJson.value = agentIo { getWorkingJson() }
+        }
+    }
+
+    fun stopTask() {
+        if (_isLoading.value) return
+        viewModelScope.launch {
+            agentIo { stopTask() }
+            _taskState.value = null
+            _workingJson.value = agentIo { getWorkingJson() }
+            appendUiMessage("🛑 Task stopped", isUser = false)
+        }
+    }
+
+    private suspend fun performSend(trimmed: String, useBootstrapForTask: Boolean) {
             _isLoading.value = true
             appendUiMessage(trimmed, isUser = true)
             val typingId = addTypingMessage()
 
             try {
                 if (_profileDirty.value) {
-                    agent.saveUserProfile(_profile.value)
-                    _profile.value = agent.getUserProfile()
+                    agentIo { saveUserProfile(_profile.value) }
+                    _profile.value = agentIo { getUserProfile() }
                     _profileDirty.value = false
                 }
 
                 if (_strategy.value.type == StrategyTypeUi.BRANCHING) ensureDefaultBranch()
 
                 val cfg = _strategy.value.toConfig()
-                val reply = agent.handleUserMessage(trimmed, cfg)
+                val reply = if (useBootstrapForTask) {
+                    agentIo { handleTaskBootstrapMessage(trimmed, cfg) }
+                } else {
+                    agentIo { handleUserMessage(trimmed, cfg) }
+                }
 
                 removeMessageById(typingId)
                 appendUiMessage(reply.text, isUser = false)
@@ -165,10 +236,11 @@ class ChatViewModel @Inject constructor(
                     isUser = false
                 )
 
-                _factsJson.value = agent.getFactsJson()
-                _workingJson.value = agent.getWorkingJson()
-                _longTermJson.value = agent.getLongTermJson()
-                _profile.value = agent.getUserProfile()
+                _factsJson.value = agentIo { getFactsJson() }
+                _workingJson.value = agentIo { getWorkingJson() }
+                _longTermJson.value = agentIo { getLongTermJson() }
+                _profile.value = agentIo { getUserProfile() }
+                applyTaskState(agentIo { getTaskState() })
 
                 if (_strategy.value.type == StrategyTypeUi.BRANCHING) refreshBranches()
 
@@ -183,12 +255,11 @@ class ChatViewModel @Inject constructor(
             } finally {
                 _isLoading.value = false
             }
-        }
     }
 
     fun resetAll() {
         viewModelScope.launch {
-            agent.resetAll()
+            agentIo { resetAll() }
             _messages.value = emptyList()
             _strategy.value = StrategyUiState()
             _factsJson.value = ""
@@ -204,7 +275,7 @@ class ChatViewModel @Inject constructor(
     fun setCheckpoint() {
         if (_isLoading.value) return
         viewModelScope.launch {
-            agent.setCheckpointAtCurrent()
+            agentIo { setCheckpointAtCurrent() }
             appendUiMessage("✅ Checkpoint set", isUser = false)
         }
     }
@@ -212,7 +283,7 @@ class ChatViewModel @Inject constructor(
     fun createBranch(branchId: String) {
         if (_isLoading.value) return
         viewModelScope.launch {
-            agent.createBranch(branchId)
+            agentIo { createBranch(branchId) }
             _strategy.value = _strategy.value.copy(activeBranchId = branchId)
             refreshBranches()
             appendUiMessage("🌿 Branch created: $branchId", isUser = false)
@@ -222,7 +293,7 @@ class ChatViewModel @Inject constructor(
     fun switchBranch(branchId: String) {
         if (_isLoading.value) return
         viewModelScope.launch {
-            agent.switchBranch(branchId)
+            agentIo { switchBranch(branchId) }
             _strategy.value = _strategy.value.copy(activeBranchId = branchId)
             refreshBranches()
             appendUiMessage("🔀 Switched to branch: $branchId", isUser = false)
@@ -233,9 +304,19 @@ class ChatViewModel @Inject constructor(
         _messages.value = _messages.value.map { if (it.id == id) it.copy(isExpanded = !it.isExpanded) else it }
     }
 
+    private suspend fun applyTaskState(state: TaskState?) {
+        if (state?.stage == TaskStage.DONE) {
+            agentIo { stopTask() }
+            _taskState.value = null
+            _workingJson.value = agentIo { getWorkingJson() }
+        } else {
+            _taskState.value = state
+        }
+    }
+
     private suspend fun refreshBranches() {
-        val branches = agent.getBranches()
-        val active = agent.getActiveBranchId()
+        val branches = agentIo { getBranches() }
+        val active = agentIo { getActiveBranchId() }
         _strategy.value = _strategy.value.copy(
             branches = branches,
             activeBranchId = active ?: _strategy.value.activeBranchId
@@ -243,11 +324,15 @@ class ChatViewModel @Inject constructor(
     }
 
     private suspend fun ensureDefaultBranch() {
-        val branches = agent.getBranches()
-        if (branches.isEmpty()) agent.createBranch("A")
-        val active = agent.getActiveBranchId()
-        if (active == null) agent.switchBranch("A")
+        val branches = agentIo { getBranches() }
+        if (branches.isEmpty()) agentIo { createBranch("A") }
+        val active = agentIo { getActiveBranchId() }
+        if (active == null) agentIo { switchBranch("A") }
         refreshBranches()
+    }
+
+    private suspend fun <T> agentIo(block: suspend ChatAgent.() -> T): T {
+        return withContext(Dispatchers.IO) { agent.block() }
     }
 
     private fun restoreUiFromHistory(history: List<AgentMessage>) {

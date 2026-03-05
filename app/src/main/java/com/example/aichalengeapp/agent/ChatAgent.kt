@@ -9,6 +9,9 @@ import com.example.aichalengeapp.agent.memory.LongTermMemoryStore
 import com.example.aichalengeapp.agent.memory.WorkingMemoryStore
 import com.example.aichalengeapp.agent.profile.UserProfile
 import com.example.aichalengeapp.agent.profile.UserProfileStore
+import com.example.aichalengeapp.agent.task.TaskManager
+import com.example.aichalengeapp.agent.task.TaskState
+import com.example.aichalengeapp.agent.task.TaskStage
 import com.example.aichalengeapp.data.AgentMessage
 import com.example.aichalengeapp.data.AgentRole
 import com.example.aichalengeapp.repo.ChatRepository
@@ -27,7 +30,8 @@ class ChatAgent @Inject constructor(
     private val selector: ContextStrategySelector,
     private val tokenEstimator: TokenEstimator,
     private val factsUpdater: FactsUpdater,
-    private val promptComposer: PromptComposer
+    private val promptComposer: PromptComposer,
+    private val taskManager: TaskManager
 ) {
     private val mutex = Mutex()
 
@@ -102,15 +106,82 @@ class ChatAgent @Inject constructor(
         longTermJson
     }
 
+    suspend fun getTaskState(): TaskState? = mutex.withLock {
+        if (!initialized) init()
+        taskManager.getTaskState()
+    }
+
+    suspend fun startTask(goal: String): TaskState = mutex.withLock {
+        if (!initialized) init()
+        val started = taskManager.startTask(goal)
+        workingJson = workingStore.loadJson()
+        started
+    }
+
+    suspend fun nextTaskStep(): TaskState? = mutex.withLock {
+        if (!initialized) init()
+        val next = taskManager.nextTaskStep()
+        workingJson = workingStore.loadJson()
+        next
+    }
+
+    suspend fun pauseTask(): TaskState? = mutex.withLock {
+        if (!initialized) init()
+        val paused = taskManager.pauseTask()
+        workingJson = workingStore.loadJson()
+        paused
+    }
+
+    suspend fun resumeTask(): TaskState? = mutex.withLock {
+        if (!initialized) init()
+        val resumed = taskManager.resumeTask()
+        workingJson = workingStore.loadJson()
+        resumed
+    }
+
+    suspend fun stopTask() = mutex.withLock {
+        if (!initialized) init()
+        taskManager.stopTask()
+        workingJson = workingStore.loadJson()
+    }
+
     suspend fun handleUserMessage(
         userText: String,
         strategyConfig: StrategyConfig
+    ): AgentReply = handleUserMessageInternal(
+        userText = userText,
+        strategyConfig = strategyConfig,
+        allowTaskAutoProgress = true
+    )
+
+    suspend fun handleTaskBootstrapMessage(
+        userText: String,
+        strategyConfig: StrategyConfig
+    ): AgentReply = handleUserMessageInternal(
+        userText = userText,
+        strategyConfig = strategyConfig,
+        allowTaskAutoProgress = false
+    )
+
+    private suspend fun handleUserMessageInternal(
+        userText: String,
+        strategyConfig: StrategyConfig,
+        allowTaskAutoProgress: Boolean
     ): AgentReply = mutex.withLock {
         if (!initialized) init()
 
         val trimmed = userText.trim()
         if (trimmed.isEmpty()) {
             return AgentReply("", TokenMetrics(0, 0, 0, null, null, null, null))
+        }
+
+        val taskState = taskManager.getTaskState()
+        if (taskState?.paused == true) {
+            return AgentReply(
+                text = "⏸️ Task mode is paused. Tap Resume to continue task progression.",
+                metrics = TokenMetrics(0, 0, 0, null, null, null, null),
+                debugLabel = "task-paused"
+            )
         }
 
         userProfile = userProfileStore.load()
@@ -151,6 +222,11 @@ class ChatAgent @Inject constructor(
 
         appendAssistantMessage(strategyConfig, answer)
         shortTermStore.save(shortTerm)
+
+        if (allowTaskAutoProgress && taskState != null && taskState.stage != TaskStage.DONE) {
+            taskManager.nextTaskStep()
+            workingJson = workingStore.loadJson()
+        }
 
         val actualPrompt = result.usage?.promptTokens
         val actualCompletion = result.usage?.completionTokens
