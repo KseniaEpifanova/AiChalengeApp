@@ -28,15 +28,13 @@ object NetworkModule {
 
     @Provides @Singleton
     fun provideOkHttp(): OkHttpClient {
-        require(BuildConfig.DEEPSEEK_API_KEY.isNotBlank()) {
-            "DEEPSEEK_API_KEY is blank. Provide it via Gradle property."
-        }
-
         val auth = Interceptor { chain ->
-            val req = chain.request().newBuilder()
-                .addHeader("Authorization", "Bearer ${BuildConfig.DEEPSEEK_API_KEY}")
+            val reqBuilder = chain.request().newBuilder()
                 .addHeader("Content-Type", "application/json")
-                .build()
+            if (BuildConfig.DEEPSEEK_API_KEY.isNotBlank()) {
+                reqBuilder.addHeader("Authorization", "Bearer ${BuildConfig.DEEPSEEK_API_KEY}")
+            }
+            val req = reqBuilder.build()
             chain.proceed(req)
         }
 

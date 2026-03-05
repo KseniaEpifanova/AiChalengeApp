@@ -1,5 +1,6 @@
 package com.example.aichalengeapp.repo
 
+import com.example.aichalengeapp.BuildConfig
 import com.example.aichalengeapp.data.AgentMessage
 import com.example.aichalengeapp.data.AgentRole
 import com.example.aichalengeapp.data.DsChatRequest
@@ -13,6 +14,12 @@ class ChatRepositoryImpl @Inject constructor(
 ) : ChatRepository {
 
     override suspend fun ask(messages: List<AgentMessage>, maxOutputTokens: Int?): LlmResult {
+        if (BuildConfig.DEEPSEEK_API_KEY.isBlank()) {
+            throw IllegalStateException(
+                "DEEPSEEK_API_KEY is blank. Add it to Gradle properties and rebuild the app."
+            )
+        }
+
         val dsMessages = messages.map { it.toDs() }
 
         val resp = api.chat(

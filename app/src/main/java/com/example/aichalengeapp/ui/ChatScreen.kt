@@ -1,20 +1,52 @@
 package com.example.aichalengeapp.ui
 
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DeleteSweep
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.aichalengeapp.vm.ChatViewModel
+
+private enum class MainDestination {
+    CHAT,
+    PROFILE
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -24,19 +56,20 @@ fun ChatScreen(
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val strategy by viewModel.strategy.collectAsStateWithLifecycle()
-
     val profile by viewModel.profile.collectAsStateWithLifecycle()
     val profileDirty by viewModel.profileDirty.collectAsStateWithLifecycle()
+    val taskState by viewModel.taskState.collectAsStateWithLifecycle()
 
     var input by remember { mutableStateOf("") }
     var showClearDialog by rememberSaveable { mutableStateOf(false) }
-
-    var strategyMenuExpanded by remember { mutableStateOf(false) }
-    var branchMenuExpanded by remember { mutableStateOf(false) }
-    var profileExpanded by rememberSaveable { mutableStateOf(true) }
+    var showStrategyDialog by rememberSaveable { mutableStateOf(false) }
+    var showTaskDialog by rememberSaveable { mutableStateOf(false) }
+    var taskGoalInput by rememberSaveable { mutableStateOf("") }
+    var settingsMenuExpanded by rememberSaveable { mutableStateOf(false) }
+    var branchMenuExpanded by rememberSaveable { mutableStateOf(false) }
+    var destination by rememberSaveable { mutableStateOf(MainDestination.CHAT) }
 
     val listState = rememberLazyListState()
-
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
     }
@@ -44,140 +77,93 @@ fun ChatScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("AI Assistant") },
+                title = {
+                    Text(if (destination == MainDestination.CHAT) "AI Assistant" else "Profile")
+                },
+                navigationIcon = {
+                    if (destination == MainDestination.PROFILE) {
+                        IconButton(onClick = { destination = MainDestination.CHAT }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    }
+                },
                 actions = {
-                    IconButton(
-                        onClick = { showClearDialog = true },
-                        enabled = !isLoading
-                    ) {
-                        Icon(Icons.Filled.DeleteSweep, contentDescription = "Reset")
+                    if (destination == MainDestination.CHAT) {
+                        IconButton(onClick = { settingsMenuExpanded = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "Settings")
+                        }
+                        DropdownMenu(
+                            expanded = settingsMenuExpanded,
+                            onDismissRequest = { settingsMenuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("User Profile") },
+                                onClick = {
+                                    settingsMenuExpanded = false
+                                    destination = MainDestination.PROFILE
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Strategy Mode") },
+                                onClick = {
+                                    settingsMenuExpanded = false
+                                    showStrategyDialog = true
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Start Task Mode") },
+                                onClick = {
+                                    settingsMenuExpanded = false
+                                    taskGoalInput = ""
+                                    showTaskDialog = true
+                                }
+                            )
+                        }
+
+                        IconButton(onClick = { showClearDialog = true }, enabled = !isLoading) {
+                            Icon(Icons.Filled.DeleteSweep, contentDescription = "Reset")
+                        }
                     }
                 }
             )
         }
     ) { innerPadding ->
+        if (destination == MainDestination.PROFILE) {
+            ProfileScreen(
+                profile = profile,
+                profileDirty = profileDirty,
+                isLoading = isLoading,
+                onStyleChange = viewModel::updateProfileStyle,
+                onFormatChange = viewModel::updateProfileFormat,
+                onConstraintsChange = viewModel::updateProfileConstraints,
+                onSave = viewModel::saveProfile,
+                onClear = viewModel::clearProfile,
+                modifier = Modifier.padding(innerPadding)
+            )
+            return@Scaffold
+        }
 
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-
-            // -------- Profile block --------
-            Surface(
-                tonalElevation = 1.dp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-            ) {
-                Column(Modifier.padding(12.dp)) {
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "User profile",
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TextButton(onClick = { profileExpanded = !profileExpanded }) {
-                            Text(if (profileExpanded) "Hide" else "Edit")
-                        }
-                    }
-
-                    if (profileExpanded) {
-                        OutlinedTextField(
-                            value = profile.style,
-                            onValueChange = viewModel::updateProfileStyle,
-                            label = { Text("Style") },
-                            placeholder = { Text("Напр: очень коротко") },
-                            modifier = Modifier.fillMaxWidth(),
-                            enabled = !isLoading
-                        )
-
-                        Spacer(Modifier.height(8.dp))
-
-                        OutlinedTextField(
-                            value = profile.format,
-                            onValueChange = viewModel::updateProfileFormat,
-                            label = { Text("Format") },
-                            placeholder = { Text("Напр: списком") },
-                            modifier = Modifier.fillMaxWidth(),
-                            enabled = !isLoading
-                        )
-
-                        Spacer(Modifier.height(8.dp))
-
-                        OutlinedTextField(
-                            value = profile.constraints,
-                            onValueChange = viewModel::updateProfileConstraints,
-                            label = { Text("Constraints") },
-                            placeholder = { Text("Напр: без английских слов") },
-                            modifier = Modifier.fillMaxWidth(),
-                            enabled = !isLoading
-                        )
-
-                        Spacer(Modifier.height(10.dp))
-
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(
-                                onClick = viewModel::saveProfile,
-                                enabled = profileDirty && !isLoading // ✅ FIX
-                            ) { Text("Save") }
-
-                            OutlinedButton(
-                                onClick = viewModel::clearProfile,
-                                enabled = !isLoading
-                            ) { Text("Clear") }
-                        }
-
-                        if (!profileDirty) {
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                text = "Saved",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
+            if (taskState != null) {
+                TaskCard(
+                    taskState = taskState!!,
+                    isLoading = isLoading,
+                    onNextStep = viewModel::nextTaskStep,
+                    onPause = viewModel::pauseTask,
+                    onResume = viewModel::resumeTask,
+                    onStop = viewModel::stopTask
+                )
             }
 
-            // -------- Strategy header--------
-            /*Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                OutlinedButton(
-                    onClick = { strategyMenuExpanded = true },
-                    enabled = !isLoading
-                ) { Text("Strategy: ${strategy.type}") }
-
-                DropdownMenu(
-                    expanded = strategyMenuExpanded,
-                    onDismissRequest = { strategyMenuExpanded = false }
-                ) {
-                    DropdownMenuItem(text = { Text("SLIDING") }, onClick = {
-                        strategyMenuExpanded = false
-                        viewModel.setStrategyType(ChatViewModel.StrategyTypeUi.SLIDING)
-                    })
-                    DropdownMenuItem(text = { Text("FACTS") }, onClick = {
-                        strategyMenuExpanded = false
-                        viewModel.setStrategyType(ChatViewModel.StrategyTypeUi.FACTS)
-                    })
-                    DropdownMenuItem(text = { Text("BRANCHING") }, onClick = {
-                        strategyMenuExpanded = false
-                        viewModel.setStrategyType(ChatViewModel.StrategyTypeUi.BRANCHING)
-                    })
-                }
-
-                Spacer(Modifier.width(12.dp))
-            }*/
-
-            // -------- Branching controls --------
             if (strategy.type == ChatViewModel.StrategyTypeUi.BRANCHING) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     OutlinedButton(onClick = viewModel::setCheckpoint, enabled = !isLoading) {
@@ -215,7 +201,6 @@ fun ChatScreen(
                 }
             }
 
-            // -------- Messages --------
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f),
@@ -229,9 +214,10 @@ fun ChatScreen(
                 }
             }
 
-            // -------- Input --------
             Row(
-                modifier = Modifier.fillMaxWidth().padding(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 TextField(
@@ -268,6 +254,75 @@ fun ChatScreen(
                     ) { Text("Reset all") }
                 },
                 dismissButton = { TextButton(onClick = { showClearDialog = false }) { Text("Cancel") } }
+            )
+        }
+
+        if (showStrategyDialog) {
+            AlertDialog(
+                onDismissRequest = { showStrategyDialog = false },
+                title = { Text("Select Strategy Mode") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = {
+                                viewModel.setStrategyType(ChatViewModel.StrategyTypeUi.SLIDING)
+                                showStrategyDialog = false
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Sliding") }
+                        OutlinedButton(
+                            onClick = {
+                                viewModel.setStrategyType(ChatViewModel.StrategyTypeUi.FACTS)
+                                showStrategyDialog = false
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Facts") }
+                        OutlinedButton(
+                            onClick = {
+                                viewModel.setStrategyType(ChatViewModel.StrategyTypeUi.BRANCHING)
+                                showStrategyDialog = false
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Branching") }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(onClick = { showStrategyDialog = false }) {
+                        Text("Close")
+                    }
+                }
+            )
+        }
+
+        if (showTaskDialog) {
+            AlertDialog(
+                onDismissRequest = { showTaskDialog = false },
+                title = { Text("Start Task Mode") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Task mode is optional and can be stopped anytime.")
+                        TextField(
+                            value = taskGoalInput,
+                            onValueChange = { taskGoalInput = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("Enter task goal") }
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            viewModel.startTask(taskGoalInput)
+                            showTaskDialog = false
+                        }
+                    ) { Text("Start") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showTaskDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
             )
         }
     }
