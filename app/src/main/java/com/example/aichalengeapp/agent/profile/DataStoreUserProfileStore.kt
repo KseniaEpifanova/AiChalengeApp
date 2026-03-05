@@ -5,7 +5,9 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import javax.inject.Inject
 
@@ -22,23 +24,27 @@ class DataStoreUserProfileStore @Inject constructor(
         val raw = prefs[KEY_PROFILE].orEmpty()
         if (raw.isBlank()) return UserProfile()
 
-        return runCatching {
-            val o = JSONObject(raw)
-            UserProfile(
-                style = o.optString("style", ""),
-                format = o.optString("format", ""),
-                constraints = o.optString("constraints", "")
-            )
-        }.getOrElse { UserProfile() }
+        return withContext(Dispatchers.Default) {
+            runCatching {
+                val o = JSONObject(raw)
+                UserProfile(
+                    style = o.optString("style", ""),
+                    format = o.optString("format", ""),
+                    constraints = o.optString("constraints", "")
+                )
+            }.getOrElse { UserProfile() }
+        }
     }
 
     override suspend fun save(profile: UserProfile) {
-        val o = JSONObject().apply {
-            put("style", profile.style)
-            put("format", profile.format)
-            put("constraints", profile.constraints)
+        val encoded = withContext(Dispatchers.Default) {
+            JSONObject().apply {
+                put("style", profile.style)
+                put("format", profile.format)
+                put("constraints", profile.constraints)
+            }.toString()
         }
-        context.userProfileDataStore.edit { it[KEY_PROFILE] = o.toString() }
+        context.userProfileDataStore.edit { it[KEY_PROFILE] = encoded }
     }
 
     override suspend fun clear() {

@@ -12,10 +12,12 @@ import com.example.aichalengeapp.agent.profile.UserProfileStore
 import com.example.aichalengeapp.data.AgentMessage
 import com.example.aichalengeapp.data.AgentRole
 import com.example.aichalengeapp.repo.ChatRepository
+import dagger.hilt.android.scopes.ViewModelScoped
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 
+@ViewModelScoped
 class ChatAgent @Inject constructor(
     private val llmRepository: ChatRepository,
     private val shortTermStore: AgentMemoryStore,
@@ -24,7 +26,8 @@ class ChatAgent @Inject constructor(
     private val userProfileStore: UserProfileStore,
     private val selector: ContextStrategySelector,
     private val tokenEstimator: TokenEstimator,
-    private val factsUpdater: FactsUpdater
+    private val factsUpdater: FactsUpdater,
+    private val promptComposer: PromptComposer
 ) {
     private val mutex = Mutex()
 
@@ -122,9 +125,9 @@ class ChatAgent @Inject constructor(
         val strategy = selector.select(strategyConfig)
         val plan = strategy.build(shortTerm, strategyConfig)
 
-        val profileDirective = buildProfileDirective(userProfile)
+        val profileDirective = promptComposer.buildProfileDirective(userProfile)
 
-        val systemPrompt = buildSystemPromptWithMemoryLayers(
+        val systemPrompt = promptComposer.buildSystemPromptWithMemoryLayers(
             base = systemPromptBase,
             profileDirective = profileDirective,
             longTerm = longTermJson,
@@ -167,50 +170,6 @@ class ChatAgent @Inject constructor(
                 estimatedCostUsd = cost
             )
         )
-    }
-
-    private fun buildProfileDirective(profile: UserProfile): String {
-        val style = profile.style.trim().ifBlank { "Нейтральный, дружелюбный." }
-        val format = profile.format.trim().ifBlank { "Коротко и по делу, при необходимости списком." }
-        val constraints = profile.constraints.trim().ifBlank { "Если не уверен — скажи, что не уверен." }
-
-        return """
-            ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ (обязательные правила для ответа):
-            1) Стиль: $style
-            2) Формат: $format
-            3) Ограничения: $constraints
-
-            Выполняй правила профиля автоматически в каждом ответе.
-        """.trimIndent()
-    }
-
-    private fun buildSystemPromptWithMemoryLayers(
-        base: String,
-        profileDirective: String,
-        longTerm: String,
-        working: String
-    ): String {
-        val lt = if (longTerm.isBlank()) "{}" else longTerm
-        val wk = if (working.isBlank()) "{}" else working
-
-        return """
-            $base
-
-            $profileDirective
-
-            MEMORY LAYERS:
-            1) SHORT-TERM: current dialog messages (provided below).
-            2) WORKING: task state (JSON).
-            3) LONG-TERM: stable memory (JSON).
-
-            If conflict: WORKING overrides LONG-TERM.
-
-            [LONG_TERM_JSON]
-            $lt
-
-            [WORKING_JSON]
-            $wk
-        """.trimIndent()
     }
 
     suspend fun setCheckpointAtCurrent() = mutex.withLock {
