@@ -1,6 +1,6 @@
 package com.example.aichalengeapp.network
 
-import com.example.aichalengeapp.Constants
+import com.example.aichalengeapp.BuildConfig
 import com.example.aichalengeapp.repo.ChatApi
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -28,16 +28,25 @@ object NetworkModule {
 
     @Provides @Singleton
     fun provideOkHttp(): OkHttpClient {
+        require(BuildConfig.DEEPSEEK_API_KEY.isNotBlank()) {
+            "DEEPSEEK_API_KEY is blank. Provide it via Gradle property."
+        }
+
         val auth = Interceptor { chain ->
             val req = chain.request().newBuilder()
-                .addHeader("Authorization", "Bearer ${Constants.DEEPSEEK_API_KEY}")
+                .addHeader("Authorization", "Bearer ${BuildConfig.DEEPSEEK_API_KEY}")
                 .addHeader("Content-Type", "application/json")
                 .build()
             chain.proceed(req)
         }
 
         val logging = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY
+            redactHeader("Authorization")
+            level = if (BuildConfig.DEBUG) {
+                HttpLoggingInterceptor.Level.BODY
+            } else {
+                HttpLoggingInterceptor.Level.NONE
+            }
         }
 
         return OkHttpClient.Builder()

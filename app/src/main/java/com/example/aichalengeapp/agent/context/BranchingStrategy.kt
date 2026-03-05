@@ -10,22 +10,25 @@ class BranchingStrategy @Inject constructor() : ContextStrategy {
             ?: error("BranchingStrategy requires StrategyConfig.Branching")
 
         val historyNoSystem = memory.history.filter { it.role != AgentRole.SYSTEM }
-
-        val checkpoint =
-            memory.branching.checkpointIndex ?: // пока чекпоинта нет — просто tail из общей истории
-            return ContextPlan(
-                messagesForLlm = historyNoSystem.takeLast(cfg.tailMessageCount),
-                debugLabel = "Branching(no-checkpoint → tail=${cfg.tailMessageCount}, hist=${historyNoSystem.size})"
-            )
-
-        val base = historyNoSystem.take(checkpoint)
-
-        val branchMsgs = memory.branching.branches[cfg.branchId]
+        val branchNoSystem = memory.branching.branches[cfg.branchId]
             ?.messages
             .orEmpty()
             .filter { it.role != AgentRole.SYSTEM }
 
-        val branchTail = branchMsgs.takeLast(cfg.tailMessageCount)
+        val checkpoint =
+            memory.branching.checkpointIndex ?: // no checkpoint yet -> prefer active branch tail
+            return ContextPlan(
+                messagesForLlm = (if (branchNoSystem.isNotEmpty()) {
+                    branchNoSystem
+                } else {
+                    historyNoSystem
+                }).takeLast(cfg.tailMessageCount),
+                debugLabel = "Branching(no-checkpoint, branch=${cfg.branchId}, branchSize=${branchNoSystem.size}, hist=${historyNoSystem.size}, tail=${cfg.tailMessageCount})"
+            )
+
+        val base = historyNoSystem.take(checkpoint)
+
+        val branchTail = branchNoSystem.takeLast(cfg.tailMessageCount)
 
         return ContextPlan(
             messagesForLlm = base + branchTail,

@@ -13,6 +13,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.aichalengeapp.vm.ChatViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -20,12 +21,12 @@ import com.example.aichalengeapp.vm.ChatViewModel
 fun ChatScreen(
     viewModel: ChatViewModel = hiltViewModel()
 ) {
-    val messages by viewModel.messages.collectAsState()
-    val isLoading by viewModel.isLoading.collectAsState()
-    val strategy by viewModel.strategy.collectAsState()
+    val messages by viewModel.messages.collectAsStateWithLifecycle()
+    val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
+    val strategy by viewModel.strategy.collectAsStateWithLifecycle()
 
-    val profile by viewModel.profile.collectAsState()
-    val profileDirty by viewModel.profileDirty.collectAsState()
+    val profile by viewModel.profile.collectAsStateWithLifecycle()
+    val profileDirty by viewModel.profileDirty.collectAsStateWithLifecycle()
 
     var input by remember { mutableStateOf("") }
     var showClearDialog by rememberSaveable { mutableStateOf(false) }

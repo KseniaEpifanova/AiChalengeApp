@@ -9,6 +9,7 @@ import com.example.aichalengeapp.agent.profile.UserProfile
 import com.example.aichalengeapp.data.AgentMessage
 import com.example.aichalengeapp.data.AgentRole
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -174,6 +175,8 @@ class ChatViewModel @Inject constructor(
             } catch (e: ContextOverflowException) {
                 removeMessageById(typingId)
                 appendUiMessage("🚫 ${e.message}", isUser = false)
+            } catch (e: CancellationException) {
+                throw e
             } catch (t: Throwable) {
                 removeMessageById(typingId)
                 appendUiMessage("⚠️ Error: ${t.message ?: t::class.java.simpleName}", isUser = false)

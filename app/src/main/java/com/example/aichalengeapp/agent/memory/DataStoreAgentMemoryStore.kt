@@ -10,7 +10,9 @@ import com.example.aichalengeapp.agent.context.BranchingState
 import com.example.aichalengeapp.data.AgentMessage
 import com.example.aichalengeapp.data.AgentRole
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import javax.inject.Inject
@@ -27,12 +29,15 @@ class DataStoreAgentMemoryStore @Inject constructor(
         val prefs = context.agentMemoryDataStore.data.first()
         val json = prefs[KEY_SHORT_TERM].orEmpty()
         if (json.isBlank()) return AgentMemoryState()
-        return runCatching { decode(json) }.getOrElse { AgentMemoryState() }
+        return withContext(Dispatchers.Default) {
+            runCatching { decode(json) }.getOrElse { AgentMemoryState() }
+        }
     }
 
     override suspend fun save(state: AgentMemoryState) {
+        val encoded = withContext(Dispatchers.Default) { encode(state) }
         context.agentMemoryDataStore.edit { prefs ->
-            prefs[KEY_SHORT_TERM] = encode(state)
+            prefs[KEY_SHORT_TERM] = encoded
         }
     }
 
