@@ -4,6 +4,9 @@ import com.example.aichalengeapp.agent.context.AgentMemoryState
 import com.example.aichalengeapp.agent.context.ContextStrategySelector
 import com.example.aichalengeapp.agent.context.StrategyConfig
 import com.example.aichalengeapp.agent.facts.FactsUpdater
+import com.example.aichalengeapp.agent.invariants.InvariantGuard
+import com.example.aichalengeapp.agent.invariants.InvariantsProfile
+import com.example.aichalengeapp.agent.invariants.InvariantsStore
 import com.example.aichalengeapp.agent.memory.AgentMemoryStore
 import com.example.aichalengeapp.agent.memory.LongTermMemoryStore
 import com.example.aichalengeapp.agent.memory.WorkingMemoryStore
@@ -27,11 +30,13 @@ class ChatAgent @Inject constructor(
     private val workingStore: WorkingMemoryStore,
     private val longTermStore: LongTermMemoryStore,
     private val userProfileStore: UserProfileStore,
+    private val invariantsStore: InvariantsStore,
     private val selector: ContextStrategySelector,
     private val tokenEstimator: TokenEstimator,
     private val factsUpdater: FactsUpdater,
     private val promptComposer: PromptComposer,
-    private val taskManager: TaskManager
+    private val taskManager: TaskManager,
+    private val invariantGuard: InvariantGuard
 ) {
     private val mutex = Mutex()
 
@@ -40,6 +45,8 @@ class ChatAgent @Inject constructor(
     private var longTermJson: String = ""
 
     private var userProfile: UserProfile = UserProfile()
+    private var invariants: InvariantsProfile = InvariantsProfile()
+    private var guardEnabled: Boolean = false
 
     private var initialized = false
 
@@ -52,6 +59,8 @@ class ChatAgent @Inject constructor(
         workingJson = workingStore.loadJson()
         longTermJson = longTermStore.loadJson()
         userProfile = userProfileStore.load()
+        invariants = invariantsStore.loadProfile()
+        guardEnabled = invariantsStore.loadGuardEnabled()
         initialized = true
     }
 
@@ -61,10 +70,14 @@ class ChatAgent @Inject constructor(
         workingJson = ""
         longTermJson = ""
         userProfile = UserProfile()
+        invariants = InvariantsProfile()
+        guardEnabled = false
         shortTermStore.clear()
         workingStore.clear()
         longTermStore.clear()
         userProfileStore.clear()
+        invariantsStore.clearProfile()
+        invariantsStore.saveGuardEnabled(false)
     }
 
     suspend fun getUserProfile(): UserProfile = mutex.withLock {
@@ -84,6 +97,36 @@ class ChatAgent @Inject constructor(
         if (!initialized) init()
         userProfile = UserProfile()
         userProfileStore.clear()
+    }
+
+    suspend fun getInvariants(): InvariantsProfile = mutex.withLock {
+        if (!initialized) init()
+        invariants = invariantsStore.loadProfile()
+        invariants
+    }
+
+    suspend fun saveInvariants(profile: InvariantsProfile) = mutex.withLock {
+        if (!initialized) init()
+        invariants = profile
+        invariantsStore.saveProfile(profile)
+    }
+
+    suspend fun clearInvariants() = mutex.withLock {
+        if (!initialized) init()
+        invariants = InvariantsProfile()
+        invariantsStore.clearProfile()
+    }
+
+    suspend fun isGuardEnabled(): Boolean = mutex.withLock {
+        if (!initialized) init()
+        guardEnabled = invariantsStore.loadGuardEnabled()
+        guardEnabled
+    }
+
+    suspend fun setGuardEnabled(enabled: Boolean) = mutex.withLock {
+        if (!initialized) init()
+        guardEnabled = enabled
+        invariantsStore.saveGuardEnabled(enabled)
     }
 
     suspend fun getHistory(): List<AgentMessage> = mutex.withLock {
@@ -197,19 +240,23 @@ class ChatAgent @Inject constructor(
         val plan = strategy.build(shortTerm, strategyConfig)
 
         val profileDirective = promptComposer.buildProfileDirective(userProfile)
+        val invariantGuardDirective = if (guardEnabled) {
+            promptComposer.buildInvariantGuardDirective(invariants)
+        } else {
+            ""
+        }
 
         val systemPrompt = promptComposer.buildSystemPromptWithMemoryLayers(
             base = systemPromptBase,
             profileDirective = profileDirective,
             longTerm = longTermJson,
-            working = workingJson
+            working = workingJson,
+            invariantGuardDirective = invariantGuardDirective
         )
 
         val llmMessages = buildList {
             add(AgentMessage(AgentRole.SYSTEM, systemPrompt))
-
             add(AgentMessage(AgentRole.USER, profileDirective))
-
             addAll(plan.messagesForLlm)
         }
 
@@ -218,7 +265,11 @@ class ChatAgent @Inject constructor(
         val estimatedHistory = (estimatedPrompt - estimatedUser).coerceAtLeast(0)
 
         val result = llmRepository.ask(llmMessages, maxOutputTokens = maxOutputTokens)
-        val answer = result.text.trim()
+        val rawAnswer = result.text.trim()
+        val answer = when (val guardResult = invariantGuard.check(rawAnswer, invariants, guardEnabled)) {
+            InvariantGuard.GuardResult.Ok -> rawAnswer
+            is InvariantGuard.GuardResult.Violation -> buildInvariantViolationResponse(guardResult)
+        }
 
         appendAssistantMessage(strategyConfig, answer)
         shortTermStore.save(shortTerm)
@@ -246,6 +297,22 @@ class ChatAgent @Inject constructor(
                 estimatedCostUsd = cost
             )
         )
+    }
+
+    private fun buildInvariantViolationResponse(violation: InvariantGuard.GuardResult.Violation): String {
+        return """
+            🚫 This request conflicts with Invariant Guard rules.
+
+            Rule:
+            ${violation.invariant}
+
+            ${violation.explanation}
+
+            Instead I can suggest:
+            • improving ViewModel separation
+            • refactoring repositories and use-cases inside current architecture
+            • strengthening module boundaries without breaking invariants
+        """.trimIndent()
     }
 
     suspend fun setCheckpointAtCurrent() = mutex.withLock {

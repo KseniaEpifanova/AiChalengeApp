@@ -1,5 +1,6 @@
 package com.example.aichalengeapp.agent
 
+import com.example.aichalengeapp.agent.invariants.InvariantsProfile
 import com.example.aichalengeapp.agent.profile.UserProfile
 import javax.inject.Inject
 
@@ -20,19 +21,39 @@ class PromptComposer @Inject constructor() {
         """.trimIndent()
     }
 
+    fun buildInvariantGuardDirective(profile: InvariantsProfile): String {
+        val tech = profile.techDecisions.trim().ifBlank { "not specified" }
+        val business = profile.businessRules.trim().ifBlank { "not specified" }
+
+        return """
+            INVARIANT GUARD (NON-NEGOTIABLE)
+
+            Technical decisions:
+            $tech
+
+            Business rules:
+            $business
+
+            You must not propose solutions that violate these constraints.
+            If a request conflicts with them, refuse and suggest compliant alternatives.
+        """.trimIndent()
+    }
+
     fun buildSystemPromptWithMemoryLayers(
         base: String,
         profileDirective: String,
         longTerm: String,
-        working: String
+        working: String,
+        invariantGuardDirective: String = ""
     ): String {
         val lt = if (longTerm.isBlank()) "{}" else longTerm
         val wk = if (working.isBlank()) "{}" else working
+        val guardBlock = if (invariantGuardDirective.isBlank()) "" else "\n\n$invariantGuardDirective"
 
         return """
             $base
 
-            $profileDirective
+            $profileDirective$guardBlock
 
             MEMORY LAYERS:
             1) SHORT-TERM: current dialog messages (provided below).
