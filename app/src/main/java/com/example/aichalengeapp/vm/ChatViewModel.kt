@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.aichalengeapp.agent.ChatAgent
 import com.example.aichalengeapp.agent.ContextOverflowException
 import com.example.aichalengeapp.agent.context.StrategyConfig
+import com.example.aichalengeapp.agent.invariants.InvariantsProfile
 import com.example.aichalengeapp.agent.profile.UserProfile
 import com.example.aichalengeapp.agent.task.TaskState
 import com.example.aichalengeapp.agent.task.TaskStage
@@ -77,6 +78,15 @@ class ChatViewModel @Inject constructor(
     private val _profileDirty = MutableStateFlow(false)
     val profileDirty: StateFlow<Boolean> = _profileDirty.asStateFlow()
 
+    private val _invariantsProfile = MutableStateFlow(InvariantsProfile())
+    val invariantsProfile: StateFlow<InvariantsProfile> = _invariantsProfile.asStateFlow()
+
+    private val _invariantsDirty = MutableStateFlow(false)
+    val invariantsDirty: StateFlow<Boolean> = _invariantsDirty.asStateFlow()
+
+    private val _guardEnabled = MutableStateFlow(false)
+    val guardEnabled: StateFlow<Boolean> = _guardEnabled.asStateFlow()
+
     private val _taskState = MutableStateFlow<TaskState?>(null)
     val taskState: StateFlow<TaskState?> = _taskState.asStateFlow()
 
@@ -95,6 +105,11 @@ class ChatViewModel @Inject constructor(
 
             _profile.value = agentIo { getUserProfile() }
             _profileDirty.value = false
+
+            _invariantsProfile.value = agentIo { getInvariants() }
+            _invariantsDirty.value = false
+            _guardEnabled.value = agentIo { isGuardEnabled() }
+
             _taskState.value = agentIo { getTaskState() }
         }
     }
@@ -129,6 +144,42 @@ class ChatViewModel @Inject constructor(
             _profile.value = agentIo { getUserProfile() }
             _profileDirty.value = false
             appendUiMessage("🧹 Profile cleared", isUser = false)
+        }
+    }
+
+    fun updateInvariantTechDecisions(v: String) {
+        _invariantsProfile.value = _invariantsProfile.value.copy(techDecisions = v)
+        _invariantsDirty.value = true
+    }
+
+    fun updateInvariantBusinessRules(v: String) {
+        _invariantsProfile.value = _invariantsProfile.value.copy(businessRules = v)
+        _invariantsDirty.value = true
+    }
+
+    fun saveInvariants() {
+        viewModelScope.launch {
+            agentIo { saveInvariants(_invariantsProfile.value) }
+            _invariantsProfile.value = agentIo { getInvariants() }
+            _invariantsDirty.value = false
+            appendUiMessage("✅ Invariant Guard saved", isUser = false)
+        }
+    }
+
+    fun clearInvariants() {
+        viewModelScope.launch {
+            agentIo { clearInvariants() }
+            _invariantsProfile.value = agentIo { getInvariants() }
+            _invariantsDirty.value = false
+            appendUiMessage("🧹 Invariant Guard cleared", isUser = false)
+        }
+    }
+
+    fun setGuardEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            _guardEnabled.value = enabled
+            agentIo { setGuardEnabled(enabled) }
+            _guardEnabled.value = agentIo { isGuardEnabled() }
         }
     }
 
@@ -206,55 +257,56 @@ class ChatViewModel @Inject constructor(
     }
 
     private suspend fun performSend(trimmed: String, useBootstrapForTask: Boolean) {
-            _isLoading.value = true
-            appendUiMessage(trimmed, isUser = true)
-            val typingId = addTypingMessage()
+        _isLoading.value = true
+        appendUiMessage(trimmed, isUser = true)
+        val typingId = addTypingMessage()
 
-            try {
-                if (_profileDirty.value) {
-                    agentIo { saveUserProfile(_profile.value) }
-                    _profile.value = agentIo { getUserProfile() }
-                    _profileDirty.value = false
-                }
-
-                if (_strategy.value.type == StrategyTypeUi.BRANCHING) ensureDefaultBranch()
-
-                val cfg = _strategy.value.toConfig()
-                val reply = if (useBootstrapForTask) {
-                    agentIo { handleTaskBootstrapMessage(trimmed, cfg) }
-                } else {
-                    agentIo { handleUserMessage(trimmed, cfg) }
-                }
-
-                removeMessageById(typingId)
-                appendUiMessage(reply.text, isUser = false)
-
-                val m = reply.metrics
-                val costStr = m.estimatedCostUsd?.let { String.format(Locale.US, "%.6f", it) } ?: "—"
-                appendUiMessage(
-                    "📊 Tokens: user≈${m.estimatedUserTokens}, history≈${m.estimatedHistoryTokens}, prompt≈${m.estimatedPromptTokens} | actual prompt=${m.actualPromptTokens ?: "—"}, completion=${m.actualCompletionTokens ?: "—"} | cost≈$$costStr",
-                    isUser = false
-                )
-
-                _factsJson.value = agentIo { getFactsJson() }
-                _workingJson.value = agentIo { getWorkingJson() }
-                _longTermJson.value = agentIo { getLongTermJson() }
+        try {
+            if (_profileDirty.value) {
+                agentIo { saveUserProfile(_profile.value) }
                 _profile.value = agentIo { getUserProfile() }
-                applyTaskState(agentIo { getTaskState() })
-
-                if (_strategy.value.type == StrategyTypeUi.BRANCHING) refreshBranches()
-
-            } catch (e: ContextOverflowException) {
-                removeMessageById(typingId)
-                appendUiMessage("🚫 ${e.message}", isUser = false)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (t: Throwable) {
-                removeMessageById(typingId)
-                appendUiMessage("⚠️ Error: ${t.message ?: t::class.java.simpleName}", isUser = false)
-            } finally {
-                _isLoading.value = false
+                _profileDirty.value = false
             }
+
+            if (_strategy.value.type == StrategyTypeUi.BRANCHING) ensureDefaultBranch()
+
+            val cfg = _strategy.value.toConfig()
+            val reply = if (useBootstrapForTask) {
+                agentIo { handleTaskBootstrapMessage(trimmed, cfg) }
+            } else {
+                agentIo { handleUserMessage(trimmed, cfg) }
+            }
+
+            removeMessageById(typingId)
+            appendUiMessage(reply.text, isUser = false)
+
+            val m = reply.metrics
+            val costStr = m.estimatedCostUsd?.let { String.format(Locale.US, "%.6f", it) } ?: "—"
+            appendUiMessage(
+                "📊 Tokens: user≈${m.estimatedUserTokens}, history≈${m.estimatedHistoryTokens}, prompt≈${m.estimatedPromptTokens} | actual prompt=${m.actualPromptTokens ?: "—"}, completion=${m.actualCompletionTokens ?: "—"} | cost≈$$costStr",
+                isUser = false
+            )
+
+            _factsJson.value = agentIo { getFactsJson() }
+            _workingJson.value = agentIo { getWorkingJson() }
+            _longTermJson.value = agentIo { getLongTermJson() }
+            _profile.value = agentIo { getUserProfile() }
+            _guardEnabled.value = agentIo { isGuardEnabled() }
+            applyTaskState(agentIo { getTaskState() })
+
+            if (_strategy.value.type == StrategyTypeUi.BRANCHING) refreshBranches()
+
+        } catch (e: ContextOverflowException) {
+            removeMessageById(typingId)
+            appendUiMessage("🚫 ${e.message}", isUser = false)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            removeMessageById(typingId)
+            appendUiMessage("⚠️ Error: ${t.message ?: t::class.java.simpleName}", isUser = false)
+        } finally {
+            _isLoading.value = false
+        }
     }
 
     fun resetAll() {
@@ -267,6 +319,9 @@ class ChatViewModel @Inject constructor(
             _longTermJson.value = ""
             _profile.value = UserProfile()
             _profileDirty.value = false
+            _invariantsProfile.value = InvariantsProfile()
+            _invariantsDirty.value = false
+            _guardEnabled.value = false
             nextId = 0L
             refreshBranches()
         }

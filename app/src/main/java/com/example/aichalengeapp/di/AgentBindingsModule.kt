@@ -2,6 +2,8 @@ package com.example.aichalengeapp.di
 
 import com.example.aichalengeapp.agent.facts.FactsUpdater
 import com.example.aichalengeapp.agent.facts.LlmFactsUpdater
+import com.example.aichalengeapp.agent.invariants.DataStoreInvariantsStore
+import com.example.aichalengeapp.agent.invariants.InvariantsStore
 import com.example.aichalengeapp.agent.memory.AgentMemoryStore
 import com.example.aichalengeapp.agent.memory.DataStoreAgentMemoryStore
 import com.example.aichalengeapp.agent.memory.DataStoreLongTermMemoryStore
@@ -45,4 +47,8 @@ abstract class AgentBindingsModule {
     @Binds
     @Singleton
     abstract fun bindUserProfileStore(impl: DataStoreUserProfileStore): UserProfileStore
+
+    @Binds
+    @Singleton
+    abstract fun bindInvariantsStore(impl: DataStoreInvariantsStore): InvariantsStore
 }
