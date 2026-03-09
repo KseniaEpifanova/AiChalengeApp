@@ -14,30 +14,37 @@ class TaskEngineTest {
     }
 
     @Test
-    fun `executor transitions planning to execution`() {
-        val executor = TaskExecutor()
-        val initial = TaskState(
-            goal = "Goal",
-            stage = TaskStage.PLANNING,
-            currentStep = 0,
-            steps = listOf("A", "B"),
-            paused = false
-        )
+    fun `executor does not move planning without approval`() {
+        val executor = TaskExecutor(TaskStateMachine())
+        val initial = TaskState(goal = "Goal", stage = TaskStage.PLANNING, planApproved = false)
         val next = executor.advance(initial)
-        assertEquals(TaskStage.EXECUTION, next.stage)
-        assertEquals(0, next.currentStep)
+        assertEquals(TaskStage.PLANNING, next.stage)
     }
 
     @Test
-    fun `validator marks complete when all steps consumed`() {
+    fun `executor moves planning to execution when approved`() {
+        val executor = TaskExecutor(TaskStateMachine())
+        val initial = TaskState(goal = "Goal", stage = TaskStage.PLANNING, planApproved = true)
+        val next = executor.advance(initial)
+        assertEquals(TaskStage.EXECUTION, next.stage)
+    }
+
+    @Test
+    fun `validator marks complete when all steps completed`() {
         val validator = TaskValidator()
         val done = TaskState(
             goal = "Goal",
-            stage = TaskStage.VALIDATION,
-            currentStep = 2,
-            steps = listOf("A", "B"),
-            paused = false
+            stage = TaskStage.VALIDATION
         )
         assertTrue(validator.isComplete(done))
+    }
+
+    @Test
+    fun `stage to step mapping is deterministic`() {
+        assertEquals("planning", stageToStep(TaskStage.PLANNING).id)
+        assertEquals("implementation", stageToStep(TaskStage.EXECUTION).id)
+        assertEquals("validation", stageToStep(TaskStage.VALIDATION).id)
+        assertEquals("done", stageToStep(TaskStage.DONE).id)
+        assertEquals("cancelled", stageToStep(TaskStage.CANCELLED).id)
     }
 }

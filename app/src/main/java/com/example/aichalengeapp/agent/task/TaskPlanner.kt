@@ -4,7 +4,7 @@ import javax.inject.Inject
 
 class TaskPlanner @Inject constructor() {
 
-    fun plan(goal: String): List<String> {
+    fun plan(goal: String): List<TaskStep> {
         val normalized = goal.trim()
         if (normalized.isEmpty()) return emptyList()
 
@@ -13,7 +13,7 @@ class TaskPlanner @Inject constructor() {
             .map { it.trim().trimStart('-', '•', '*', ' ') }
             .filter { it.isNotBlank() }
 
-        return if (explicit.size >= 2) {
+        val titles = if (explicit.size >= 2) {
             explicit
         } else {
             listOf(
@@ -21,6 +21,10 @@ class TaskPlanner @Inject constructor() {
                 "Execute the core work for: $normalized",
                 "Validate and finalize the result"
             )
+        }
+
+        return titles.mapIndexed { index, title ->
+            TaskStep(id = "step_${index + 1}", title = title)
         }
     }
 }

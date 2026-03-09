@@ -6,8 +6,10 @@ import com.example.aichalengeapp.data.AgentRole
 import com.example.aichalengeapp.data.DsChatRequest
 import com.example.aichalengeapp.data.DsMessage
 import com.example.aichalengeapp.data.LlmResult
-import javax.inject.Inject
 import com.example.aichalengeapp.data.LlmUsage
+import java.io.IOException
+import java.net.UnknownHostException
+import javax.inject.Inject
 
 class ChatRepositoryImpl @Inject constructor(
     private val api: ChatApi
@@ -22,14 +24,26 @@ class ChatRepositoryImpl @Inject constructor(
 
         val dsMessages = messages.map { it.toDs() }
 
-        val resp = api.chat(
-            DsChatRequest(
-                model = "deepseek-chat",
-                messages = dsMessages,
-                temperature = 0.3,
-                max_tokens = maxOutputTokens
+        val resp = try {
+            api.chat(
+                DsChatRequest(
+                    model = "deepseek-chat",
+                    messages = dsMessages,
+                    temperature = 0.3,
+                    max_tokens = maxOutputTokens
+                )
             )
-        )
+        } catch (e: UnknownHostException) {
+            throw IOException(
+                "Unable to resolve host. Check internet connection.",
+                e
+            )
+        } catch (e: IllegalArgumentException) {
+            throw IOException(
+                "Invalid networking configuration.",
+                e
+            )
+        }
 
         val text = resp.choices.firstOrNull()?.message?.content.orEmpty()
         val usage = resp.usage?.let {

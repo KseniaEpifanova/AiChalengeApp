@@ -2,15 +2,8 @@ package com.example.aichalengeapp.agent.task
 
 data class TaskState(
     val goal: String,
-    val stage: TaskStage,
-    val currentStep: Int,
-    val steps: List<String>,
-    val paused: Boolean
+    val stage: TaskStage = TaskStage.PLANNING,
+    val paused: Boolean = false,
+    val steps: List<TaskStep> = emptyList(),
+    val planApproved: Boolean = false
 )
-
-enum class TaskStage {
-    PLANNING,
-    EXECUTION,
-    VALIDATION,
-    DONE
-}

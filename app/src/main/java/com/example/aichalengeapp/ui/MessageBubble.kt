@@ -19,12 +19,26 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import android.util.Log
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.aichalengeapp.vm.ChatViewModel
+
+data class BubbleRenderConfig(
+    val maxLines: Int,
+    val overflow: TextOverflow
+)
+
+internal fun bubbleRenderConfig(expanded: Boolean, collapsedLines: Int): BubbleRenderConfig {
+    return if (expanded) {
+        BubbleRenderConfig(maxLines = Int.MAX_VALUE, overflow = TextOverflow.Visible)
+    } else {
+        BubbleRenderConfig(maxLines = collapsedLines, overflow = TextOverflow.Ellipsis)
+    }
+}
 
 @Composable
 fun MessageBubble(
@@ -56,8 +70,9 @@ fun MessageBubble(
     }
 
     val expanded = message.isExpanded
+    val renderConfig = bubbleRenderConfig(expanded = expanded, collapsedLines = collapsedLines)
 
-    var hasOverflow by remember(message.id) { mutableStateOf(false) }
+    var hasOverflow by remember(message.id, message.text) { mutableStateOf(false) }
 
     val canToggle = hasOverflow || expanded
 
@@ -83,14 +98,27 @@ fun MessageBubble(
                     text = message.text,
                     style = MaterialTheme.typography.bodyMedium,
                     softWrap = true,
-                    maxLines = if (expanded) Int.MAX_VALUE else collapsedLines,
-                    overflow = if (expanded) TextOverflow.Clip else TextOverflow.Ellipsis,
+                    maxLines = renderConfig.maxLines,
+                    overflow = renderConfig.overflow,
                     onTextLayout = { result ->
                         if (!expanded) {
                             hasOverflow = result.hasVisualOverflow
+                        } else {
+                            hasOverflow = true
+                            Log.d("MessageBubble", "expanded=true textLength=${message.text.length} maxLines=${renderConfig.maxLines}")
                         }
                     }
                 )
+
+                val footer = message.tokenInfo
+                if (!footer.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = footer,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
 
                 if (canToggle) {
                     Spacer(modifier = Modifier.height(4.dp))

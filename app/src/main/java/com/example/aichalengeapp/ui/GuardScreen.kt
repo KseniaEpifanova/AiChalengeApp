@@ -12,21 +12,18 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.example.aichalengeapp.agent.invariants.InvariantsProfile
+import com.example.aichalengeapp.agent.guard.InvariantsProfile
 
 @Composable
 fun GuardScreen(
     profile: InvariantsProfile,
-    guardEnabled: Boolean,
+    isGuardActive: Boolean,
     dirty: Boolean,
     isLoading: Boolean,
-    onGuardEnabledChange: (Boolean) -> Unit,
     onTechDecisionsChange: (String) -> Unit,
     onBusinessRulesChange: (String) -> Unit,
     onSave: () -> Unit,
@@ -40,20 +37,11 @@ fun GuardScreen(
     ) {
         Text("Invariant Guard", style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(12.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Guard Mode", style = MaterialTheme.typography.titleMedium)
-            Switch(
-                checked = guardEnabled,
-                onCheckedChange = onGuardEnabledChange,
-                enabled = !isLoading
-            )
-        }
-
+        Text(
+            text = if (isGuardActive) "Active automatically (invariants are set)" else "Inactive (add invariants to enable)",
+            style = MaterialTheme.typography.bodySmall,
+            color = if (isGuardActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+        )
         Spacer(Modifier.height(8.dp))
         Text(
             text = if (dirty) "Unsaved changes" else "Saved",
