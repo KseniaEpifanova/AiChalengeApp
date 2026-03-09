@@ -30,6 +30,7 @@ fun TaskStageStepper(
         TaskStage.VALIDATION to "Validation",
         TaskStage.DONE to "Done"
     )
+
     val currentIndex = stageItems.indexOfFirst { it.first == currentStage }.coerceAtLeast(0)
 
     Row(

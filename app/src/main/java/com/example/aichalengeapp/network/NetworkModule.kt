@@ -20,13 +20,15 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
 
-    @Provides @Singleton
+    @Provides
+    @Singleton
     fun provideMoshi(): Moshi =
         Moshi.Builder()
             .add(KotlinJsonAdapterFactory())
             .build()
 
-    @Provides @Singleton
+    @Provides
+    @Singleton
     fun provideOkHttp(): OkHttpClient {
         val auth = Interceptor { chain ->
             val reqBuilder = chain.request().newBuilder()
@@ -34,17 +36,12 @@ object NetworkModule {
             if (BuildConfig.DEEPSEEK_API_KEY.isNotBlank()) {
                 reqBuilder.addHeader("Authorization", "Bearer ${BuildConfig.DEEPSEEK_API_KEY}")
             }
-            val req = reqBuilder.build()
-            chain.proceed(req)
+            chain.proceed(reqBuilder.build())
         }
 
         val logging = HttpLoggingInterceptor().apply {
             redactHeader("Authorization")
-            level = if (BuildConfig.DEBUG) {
-                HttpLoggingInterceptor.Level.BODY
-            } else {
-                HttpLoggingInterceptor.Level.NONE
-            }
+            level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BODY else HttpLoggingInterceptor.Level.NONE
         }
 
         return OkHttpClient.Builder()
@@ -57,15 +54,17 @@ object NetworkModule {
             .build()
     }
 
-    @Provides @Singleton
+    @Provides
+    @Singleton
     fun provideRetrofit(moshi: Moshi, okHttp: OkHttpClient): Retrofit =
         Retrofit.Builder()
-            .baseUrl("https://api.deepseek.com/") // :contentReference[oaicite:2]{index=2}
+            .baseUrl("https://api.deepseek.com/")
             .client(okHttp)
             .addConverterFactory(MoshiConverterFactory.create(moshi))
             .build()
 
-    @Provides @Singleton
+    @Provides
+    @Singleton
     fun provideDeepSeekApi(retrofit: Retrofit): ChatApi =
         retrofit.create(ChatApi::class.java)
 }

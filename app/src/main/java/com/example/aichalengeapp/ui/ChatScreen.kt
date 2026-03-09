@@ -1,5 +1,6 @@
 package com.example.aichalengeapp.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -13,8 +14,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -40,6 +39,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import android.util.Log
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -50,9 +50,9 @@ import kotlinx.coroutines.launch
 
 private enum class MainDestination {
     CHAT,
-    PROFILE,
-    STRATEGY,
-    INVARIANT_GUARD
+    PROFILES,
+    INVARIANT_GUARD,
+    SETTINGS
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -64,11 +64,13 @@ fun ChatScreen(
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val strategy by viewModel.strategy.collectAsStateWithLifecycle()
     val profile by viewModel.profile.collectAsStateWithLifecycle()
+    val planningDraft by viewModel.planningDraft.collectAsStateWithLifecycle()
     val profileDirty by viewModel.profileDirty.collectAsStateWithLifecycle()
+    val profiles by viewModel.profiles.collectAsStateWithLifecycle()
     val taskState by viewModel.taskState.collectAsStateWithLifecycle()
     val invariantsProfile by viewModel.invariantsProfile.collectAsStateWithLifecycle()
     val invariantsDirty by viewModel.invariantsDirty.collectAsStateWithLifecycle()
-    val guardEnabled by viewModel.guardEnabled.collectAsStateWithLifecycle()
+    val guardActive by viewModel.guardActive.collectAsStateWithLifecycle()
 
     var input by remember { mutableStateOf("") }
     var showClearDialog by rememberSaveable { mutableStateOf(false) }
@@ -80,9 +82,21 @@ fun ChatScreen(
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
+    BackHandler(enabled = destination != MainDestination.CHAT || drawerState.isOpen) {
+        if (drawerState.isOpen) {
+            scope.launch { drawerState.close() }
+        } else {
+            destination = MainDestination.CHAT
+        }
+    }
+
     val listState = rememberLazyListState()
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
+    }
+    LaunchedEffect(taskState?.stage, taskState?.paused) {
+        val visible = isTaskPanelVisible(taskState)
+        Log.d("TaskPanelVisibility", "composeState stage=${taskState?.stage} paused=${taskState?.paused} visible=$visible")
     }
 
     ModalNavigationDrawer(
@@ -94,18 +108,18 @@ fun ChatScreen(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
                 )
                 NavigationDrawerItem(
-                    label = { Text("Profile") },
-                    selected = destination == MainDestination.PROFILE,
+                    label = { Text("Chat") },
+                    selected = destination == MainDestination.CHAT,
                     onClick = {
-                        destination = MainDestination.PROFILE
+                        destination = MainDestination.CHAT
                         scope.launch { drawerState.close() }
                     }
                 )
                 NavigationDrawerItem(
-                    label = { Text("Strategy") },
-                    selected = destination == MainDestination.STRATEGY,
+                    label = { Text("Profiles") },
+                    selected = destination == MainDestination.PROFILES,
                     onClick = {
-                        destination = MainDestination.STRATEGY
+                        destination = MainDestination.PROFILES
                         scope.launch { drawerState.close() }
                     }
                 )
@@ -114,6 +128,14 @@ fun ChatScreen(
                     selected = destination == MainDestination.INVARIANT_GUARD,
                     onClick = {
                         destination = MainDestination.INVARIANT_GUARD
+                        scope.launch { drawerState.close() }
+                    }
+                )
+                NavigationDrawerItem(
+                    label = { Text("Settings") },
+                    selected = destination == MainDestination.SETTINGS,
+                    onClick = {
+                        destination = MainDestination.SETTINGS
                         scope.launch { drawerState.close() }
                     }
                 )
@@ -126,21 +148,15 @@ fun ChatScreen(
                     title = {
                         val title = when (destination) {
                             MainDestination.CHAT -> "AI Assistant"
-                            MainDestination.PROFILE -> "Profile"
-                            MainDestination.STRATEGY -> "Strategy"
+                            MainDestination.PROFILES -> "Profiles"
                             MainDestination.INVARIANT_GUARD -> "Invariant Guard"
+                            MainDestination.SETTINGS -> "Settings"
                         }
                         Text(title)
                     },
                     navigationIcon = {
-                        if (destination == MainDestination.CHAT) {
-                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                Icon(Icons.Filled.Menu, contentDescription = "Open settings")
-                            }
-                        } else {
-                            IconButton(onClick = { destination = MainDestination.CHAT }) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                            }
+                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                            Icon(Icons.Filled.Menu, contentDescription = "Open menu")
                         }
                     },
                     actions = {
@@ -151,8 +167,8 @@ fun ChatScreen(
                             }) {
                                 Text("Task")
                             }
-                            IconButton(onClick = { showClearDialog = true }, enabled = !isLoading) {
-                                Icon(Icons.Filled.DeleteSweep, contentDescription = "Reset")
+                            TextButton(onClick = { showClearDialog = true }, enabled = !isLoading) {
+                                Text("Clear chat")
                             }
                         }
                     }
@@ -160,25 +176,42 @@ fun ChatScreen(
             }
         ) { innerPadding ->
             when (destination) {
-                MainDestination.PROFILE -> {
-                    ProfileScreen(
+                MainDestination.PROFILES -> {
+                    ProfilesScreen(
+                        profiles = profiles,
                         profile = profile,
+                        planningDraft = planningDraft,
                         profileDirty = profileDirty,
                         isLoading = isLoading,
+                        onCreateProfile = viewModel::createProfile,
+                        onStartEditingProfile = viewModel::startEditingProfile,
+                        onStopEditingProfile = viewModel::stopEditingProfile,
+                        onDeleteProfile = viewModel::deleteProfile,
                         onStyleChange = viewModel::updateProfileStyle,
                         onFormatChange = viewModel::updateProfileFormat,
                         onConstraintsChange = viewModel::updateProfileConstraints,
                         onSave = viewModel::saveProfile,
                         onClear = viewModel::clearProfile,
+                        onAutoDetectChange = viewModel::updatePlanningAutoDetect,
+                        onSensitivityChange = viewModel::updatePlanningSensitivity,
+                        onRequirePlanApprovalChange = viewModel::updatePlanningRequirePlanApproval,
+                        onAllowAutoContinueChange = viewModel::updatePlanningAutoContinueExecution,
+                        onRequireValidationChange = viewModel::updatePlanningRequireValidation,
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
 
-                MainDestination.STRATEGY -> {
-                    StrategyScreen(
+                MainDestination.SETTINGS -> {
+                    SettingsScreen(
                         currentStrategy = strategy.type,
                         isLoading = isLoading,
                         onSelectStrategy = viewModel::setStrategyType,
+                        taskState = taskState,
+                        onNextStep = viewModel::nextTaskStep,
+                        onPause = viewModel::pauseTask,
+                        onResume = viewModel::resumeTask,
+                        onCancel = viewModel::cancelTask,
+                        onResetAll = viewModel::resetAll,
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
@@ -186,10 +219,9 @@ fun ChatScreen(
                 MainDestination.INVARIANT_GUARD -> {
                     GuardScreen(
                         profile = invariantsProfile,
-                        guardEnabled = guardEnabled,
+                        isGuardActive = guardActive,
                         dirty = invariantsDirty,
                         isLoading = isLoading,
-                        onGuardEnabledChange = viewModel::setGuardEnabled,
                         onTechDecisionsChange = viewModel::updateInvariantTechDecisions,
                         onBusinessRulesChange = viewModel::updateInvariantBusinessRules,
                         onSave = viewModel::saveInvariants,
@@ -204,14 +236,14 @@ fun ChatScreen(
                             .fillMaxSize()
                             .padding(innerPadding)
                     ) {
-                        if (taskState != null) {
+                        if (isTaskPanelVisible(taskState)) {
                             TaskCard(
                                 taskState = taskState!!,
                                 isLoading = isLoading,
                                 onNextStep = viewModel::nextTaskStep,
                                 onPause = viewModel::pauseTask,
                                 onResume = viewModel::resumeTask,
-                                onStop = viewModel::stopTask
+                                onCancel = viewModel::cancelTask
                             )
                         }
 
@@ -301,15 +333,15 @@ fun ChatScreen(
             if (showClearDialog) {
                 AlertDialog(
                     onDismissRequest = { showClearDialog = false },
-                    title = { Text("Reset?") },
-                    text = { Text("This will clear chat and memories.") },
+                    title = { Text("Clear chat?") },
+                    text = { Text("This will clear only current chat messages and active task panel.") },
                     confirmButton = {
                         TextButton(
                             onClick = {
                                 showClearDialog = false
-                                viewModel.resetAll()
+                                viewModel.clearChatSession()
                             }
-                        ) { Text("Reset all") }
+                        ) { Text("Clear chat") }
                     },
                     dismissButton = { TextButton(onClick = { showClearDialog = false }) { Text("Cancel") } }
                 )
