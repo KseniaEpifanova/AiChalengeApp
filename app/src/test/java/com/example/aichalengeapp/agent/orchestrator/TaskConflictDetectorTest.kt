@@ -46,4 +46,15 @@ class TaskConflictDetectorTest {
         )
         assertFalse(blocked)
     }
+
+    @Test
+    fun `blocks explicit new task for task request kind`() {
+        val blocked = detector.shouldBlockConcurrentStart(
+            activeTask = activeTask,
+            incomingMessage = "start another task: build auth flow",
+            requestKind = RequestKind.TASK,
+            hasTransitionIntent = false
+        )
+        assertTrue(blocked)
+    }
 }

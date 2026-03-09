@@ -1,5 +1,6 @@
 package com.example.aichalengeapp.agent.task
 
+import com.example.aichalengeapp.debug.TaskTrace
 import javax.inject.Inject
 
 class TaskStateMachine @Inject constructor() {
@@ -33,6 +34,15 @@ class TaskStateMachine @Inject constructor() {
 
     fun transition(state: TaskState, to: TaskStage): TaskTransitionResult {
         val from = state.stage
+        TaskTrace.d(
+            "event" to "fsm_transition_attempt",
+            "taskId" to TaskTrace.taskId(state),
+            "beforeStage" to from,
+            "beforeApproved" to state.planApproved,
+            "paused" to state.paused,
+            "requestedTarget" to to,
+            "fsmValidationCalled" to true
+        )
         if (!canTransition(from, to, state)) {
             val reason = when {
                 state.paused && to != TaskStage.CANCELLED -> "Task is paused"
@@ -48,15 +58,35 @@ class TaskStateMachine @Inject constructor() {
                 TaskStage.DONE -> "Task is already done"
                 TaskStage.CANCELLED -> "Task is cancelled"
             }
+            TaskTrace.d(
+                "event" to "fsm_transition_result",
+                "taskId" to TaskTrace.taskId(state),
+                "from" to from,
+                "to" to to,
+                "fsmResult" to "INVALID",
+                "reason" to reason,
+                "suggestedNextAction" to suggestion,
+                "afterStage" to state.stage
+            )
             return TaskTransitionResult.Invalid(reason, suggestion)
         }
 
-        return TaskTransitionResult.Success(
+        val next = TaskTransitionResult.Success(
             state.copy(
                 stage = to,
                 paused = false
             )
         )
+        TaskTrace.d(
+            "event" to "fsm_transition_result",
+            "taskId" to TaskTrace.taskId(state),
+            "from" to from,
+            "to" to to,
+            "fsmResult" to "SUCCESS",
+            "afterStage" to next.newState.stage,
+            "afterApproved" to next.newState.planApproved
+        )
+        return next
     }
 
     fun pause(state: TaskState): TaskState = state.copy(paused = true)

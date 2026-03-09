@@ -18,6 +18,7 @@ import com.example.aichalengeapp.agent.task.TaskState
 import com.example.aichalengeapp.agent.task.TaskTransitionResult
 import com.example.aichalengeapp.data.AgentMessage
 import com.example.aichalengeapp.data.AgentRole
+import com.example.aichalengeapp.debug.TaskTrace
 import com.example.aichalengeapp.ui.isTaskPanelVisible
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
@@ -349,14 +350,35 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             val before = _taskState.value?.stage
             if (before == TaskStage.DONE || before == TaskStage.CANCELLED) {
+                TaskTrace.d(
+                    "event" to "vm_next_click_ignored",
+                    "source" to "button",
+                    "taskId" to TaskTrace.taskId(_taskState.value),
+                    "beforeStage" to before,
+                    "reason" to "terminal_stage"
+                )
                 appendUiMessage("✅ Task already completed. Start a new task if needed.", isUser = false)
                 return@launch
             }
             val cfg = _strategy.value.toConfig()
             appendUiMessage("▶️ Next step", isUser = true)
+            TaskTrace.d(
+                "event" to "vm_next_click",
+                "source" to "button",
+                "taskId" to TaskTrace.taskId(_taskState.value),
+                "beforeStage" to before,
+                "paused" to _taskState.value?.paused
+            )
             Log.d(TAG, "nextClicked before=$before")
             val reply = agentIo { handleTaskIntentAction(TaskChatIntent.CONTINUE_TASK, cfg) }
             appendUiMessage(reply.text, isUser = false)
+            TaskTrace.d(
+                "event" to "vm_next_reply",
+                "source" to "button",
+                "taskId" to TaskTrace.taskId(_taskState.value),
+                "responseLength" to reply.text.length,
+                "responsePreview" to TaskTrace.preview(reply.text)
+            )
             Log.d(TAG, "apiReplyLength=${reply.text.length}")
 
             _factsJson.value = agentIo { getFactsJson() }
@@ -436,6 +458,14 @@ class ChatViewModel @Inject constructor(
     private suspend fun performSend(trimmed: String, useBootstrapForTask: Boolean) {
         _isLoading.value = true
         appendUiMessage(trimmed, isUser = true)
+        TaskTrace.d(
+            "event" to "vm_send",
+            "source" to if (useBootstrapForTask) "auto" else "chat",
+            "taskId" to TaskTrace.taskId(_taskState.value),
+            "msg" to trimmed,
+            "beforeStage" to _taskState.value?.stage,
+            "paused" to _taskState.value?.paused
+        )
         val typingId = addTypingMessage()
 
         try {
@@ -466,6 +496,13 @@ class ChatViewModel @Inject constructor(
             val tokenInfo = "📊 Tokens: user≈${m.estimatedUserTokens}  history≈${m.estimatedHistoryTokens}  prompt≈${m.estimatedPromptTokens}\n" +
                 "actual prompt=${m.actualPromptTokens ?: "—"}  completion=${m.actualCompletionTokens ?: "—"}  cost≈$$costStr"
             appendUiMessage(reply.text, isUser = false, tokenInfo = tokenInfo)
+            TaskTrace.d(
+                "event" to "vm_reply_applied",
+                "source" to if (useBootstrapForTask) "auto" else "chat",
+                "taskId" to TaskTrace.taskId(_taskState.value),
+                "responseLength" to reply.text.length,
+                "responsePreview" to TaskTrace.preview(reply.text)
+            )
 
             _factsJson.value = agentIo { getFactsJson() }
             _workingJson.value = agentIo { getWorkingJson() }
@@ -558,6 +595,16 @@ class ChatViewModel @Inject constructor(
     private suspend fun applyTaskState(state: TaskState?) {
         _taskState.value = state
         val visible = isTaskPanelVisible(state)
+        val snapshot = TaskTrace.snapshot(state, panelVisible = visible)
+        TaskTrace.d(
+            "event" to "vm_task_state_observed",
+            "source" to "viewmodel",
+            "taskId" to snapshot.taskId,
+            "vmStage" to snapshot.stage,
+            "planApproved" to snapshot.planApproved,
+            "paused" to snapshot.paused,
+            "panelVisible" to snapshot.panelVisible
+        )
         Log.d(TASK_UI_TAG, "taskState=${state?.stage} paused=${state?.paused} panelVisible=$visible")
     }
 

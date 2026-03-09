@@ -28,6 +28,7 @@ import com.example.aichalengeapp.agent.task.TaskState
 import com.example.aichalengeapp.agent.task.TaskTransitionResult
 import com.example.aichalengeapp.data.AgentMessage
 import com.example.aichalengeapp.data.AgentRole
+import com.example.aichalengeapp.debug.TaskTrace
 import com.example.aichalengeapp.repo.ChatRepository
 import android.util.Log
 import dagger.hilt.android.scopes.ViewModelScoped
@@ -332,8 +333,24 @@ class ChatAgent @Inject constructor(
         }
 
         var taskState = taskManager.getTaskState()
+        val stageAtTurnStart = taskState?.stage
         val hadActiveTaskAtTurnStart = taskState != null
+        TaskTrace.d(
+            "event" to "incoming_message",
+            "source" to transitionSource,
+            "taskId" to TaskTrace.taskId(taskState),
+            "msg" to trimmed,
+            "beforeStage" to taskState?.stage,
+            "beforeApproved" to taskState?.planApproved,
+            "paused" to taskState?.paused
+        )
         if (taskState?.paused == true) {
+            TaskTrace.d(
+                "event" to "transition_blocked_paused",
+                "source" to transitionSource,
+                "taskId" to TaskTrace.taskId(taskState),
+                "beforeStage" to taskState.stage
+            )
             return AgentReply(
                 text = "⏸️ Task lifecycle is paused. Resume or cancel to continue.",
                 metrics = TokenMetrics(0, 0, 0, null, null, null, null),
@@ -368,7 +385,8 @@ class ChatAgent @Inject constructor(
             taskIntentDetector.detect(
                 message = trimmed,
                 activeProfile = context.activeProfile,
-                taskState = taskState
+                taskState = taskState,
+                source = transitionSource
             )
         }
         val detectedIntent = intentDecision.intent
@@ -379,6 +397,14 @@ class ChatAgent @Inject constructor(
         val normalizedIntent = normalizeIntentForStage(
             detectedIntent = detectedIntent,
             currentStage = taskState?.stage
+        )
+        TaskTrace.d(
+            "event" to "intent_normalized",
+            "source" to transitionSource,
+            "taskId" to TaskTrace.taskId(taskState),
+            "detectedIntent" to detectedIntent,
+            "normalizedIntent" to normalizedIntent,
+            "beforeStage" to taskState?.stage
         )
         Log.d(
             "TaskIntent",
@@ -416,6 +442,15 @@ class ChatAgent @Inject constructor(
             taskState = taskManager.startTask(trimmed)
             taskStartedThisTurn = true
             workingJson = workingStore.loadJson()
+            TaskTrace.d(
+                "event" to "task_auto_started",
+                "source" to transitionSource,
+                "taskId" to TaskTrace.taskId(taskState),
+                "msg" to trimmed,
+                "intent" to normalizedIntent,
+                "afterStage" to taskState?.stage,
+                "persisted" to true
+            )
             Log.d(TAG, "taskAutoStarted=true stage=${taskState?.stage} goal=\"${taskState?.goal}\"")
         }
 
@@ -436,6 +471,15 @@ class ChatAgent @Inject constructor(
             val actionResult = applyTaskIntentAction(taskState, normalizedIntent, transitionSource)
             workingJson = workingStore.loadJson()
             if (actionResult is IntentActionResult.Invalid) {
+                TaskTrace.d(
+                    "event" to "intent_action_invalid",
+                    "source" to transitionSource,
+                    "taskId" to TaskTrace.taskId(taskState),
+                    "intent" to normalizedIntent,
+                    "beforeStage" to taskState.stage,
+                    "reason" to actionResult.reason,
+                    "suggestedNextAction" to actionResult.nextAction
+                )
                 return AgentReply(
                     text = "🚫 ${actionResult.reason}. Next valid step: ${actionResult.nextAction}.",
                     metrics = TokenMetrics(0, 0, 0, null, null, null, null),
@@ -443,6 +487,15 @@ class ChatAgent @Inject constructor(
                 )
             }
             taskState = taskManager.getTaskState()
+            TaskTrace.d(
+                "event" to "intent_action_persisted",
+                "source" to transitionSource,
+                "taskId" to TaskTrace.taskId(taskState),
+                "intent" to normalizedIntent,
+                "afterStage" to taskState?.stage,
+                "afterApproved" to taskState?.planApproved,
+                "persisted" to true
+            )
             Log.d("TaskTransition", "source=$transitionSource persistedStage=${taskState?.stage}")
         }
 
@@ -460,11 +513,29 @@ class ChatAgent @Inject constructor(
         val strategy = selector.select(strategyConfig)
         val plan = strategy.build(shortTerm, strategyConfig)
 
+        val persistedTaskState = taskManager.getTaskState()
+        val responseTaskState = persistedTaskState ?: taskState
+        val stageChangedNotice = when {
+            responseTaskState == null -> null
+            stageAtTurnStart == responseTaskState.stage -> null
+            else -> "The task stage has changed to ${responseTaskState.stage}. " +
+                "You must strictly follow the stage contract for ${responseTaskState.stage}."
+        }
+        TaskTrace.d(
+            "event" to "response_stage_context",
+            "source" to transitionSource,
+            "taskId" to TaskTrace.taskId(responseTaskState),
+            "responseStageContext" to responseTaskState?.stage,
+            "responseApproved" to responseTaskState?.planApproved,
+            "persistedStage" to persistedTaskState?.stage,
+            "stageChanged" to (stageChangedNotice != null)
+        )
+
         val refreshedContext = orchestrator.buildExecutionContext(
             profiles = profiles,
             activeProfileId = activeProfileId,
             invariants = invariants,
-            taskState = taskState,
+            taskState = responseTaskState,
             strategyConfig = strategyConfig,
             message = trimmed,
             longTermJson = longTermJson,
@@ -479,10 +550,30 @@ class ChatAgent @Inject constructor(
         )
 
         val systemPrompt = orchestrator.buildSystemPrompt(systemPromptBase, refreshedContext)
+        TaskTrace.d(
+            "event" to "llm_prompt_context",
+            "source" to transitionSource,
+            "taskId" to TaskTrace.taskId(refreshedContext.taskState),
+            "stageForGeneration" to refreshedContext.taskState?.stage,
+            "guardActive" to guardActive
+        )
 
         val llmMessages = buildList {
             add(AgentMessage(AgentRole.SYSTEM, systemPrompt))
+            if (stageChangedNotice != null) {
+                add(AgentMessage(AgentRole.SYSTEM, stageChangedNotice))
+            }
             addAll(plan.messagesForLlm)
+        }
+        if (stageChangedNotice != null) {
+            TaskTrace.d(
+                "event" to "stage_change_notice_injected",
+                "source" to transitionSource,
+                "taskId" to TaskTrace.taskId(responseTaskState),
+                "beforeStage" to stageAtTurnStart,
+                "afterStage" to responseTaskState?.stage,
+                "notice" to stageChangedNotice
+            )
         }
 
         val estimatedPrompt = tokenEstimator.estimateTokens(llmMessages)
@@ -491,6 +582,14 @@ class ChatAgent @Inject constructor(
 
         val result = llmRepository.ask(llmMessages, maxOutputTokens = maxOutputTokens)
         val rawAnswer = result.text.trim()
+        TaskTrace.d(
+            "event" to "llm_response",
+            "source" to transitionSource,
+            "taskId" to TaskTrace.taskId(taskState),
+            "stageForResponse" to refreshedContext.taskState?.stage,
+            "responsePreview" to TaskTrace.preview(rawAnswer),
+            "responseLength" to rawAnswer.length
+        )
 
         val answer = when (val guardResult = invariantGuard.check(rawAnswer, if (guardActive) invariants else InvariantsProfile())) {
             GuardResult.Ok -> rawAnswer
@@ -505,6 +604,14 @@ class ChatAgent @Inject constructor(
             if (liveTask != null && !liveTask.paused && liveTask.stage != TaskStage.DONE && liveTask.stage != TaskStage.CANCELLED) {
                 taskManager.nextTaskStep()
                 workingJson = workingStore.loadJson()
+                val progressed = taskManager.getTaskState()
+                TaskTrace.d(
+                    "event" to "auto_progress_applied",
+                    "source" to transitionSource,
+                    "taskId" to TaskTrace.taskId(progressed),
+                    "afterStage" to progressed?.stage,
+                    "persisted" to true
+                )
             }
         }
 
@@ -679,6 +786,15 @@ class ChatAgent @Inject constructor(
         intent: TaskChatIntent,
         source: String
     ): IntentActionResult {
+        TaskTrace.d(
+            "event" to "task_action_requested",
+            "source" to source,
+            "taskId" to TaskTrace.taskId(state),
+            "intent" to intent,
+            "beforeStage" to state.stage,
+            "beforeApproved" to state.planApproved,
+            "paused" to state.paused
+        )
         Log.d("TaskTransition", "source=$source currentStage=${state.stage} intent=$intent")
         if (state.stage == TaskStage.DONE) {
             return IntentActionResult.Invalid(
@@ -704,10 +820,30 @@ class ChatAgent @Inject constructor(
                 val result = taskManager.attemptTransition(TaskStage.EXECUTION)
                 when (result) {
                     is TaskTransitionResult.Success -> {
+                        TaskTrace.d(
+                            "event" to "task_action_result",
+                            "source" to source,
+                            "taskId" to TaskTrace.taskId(result.newState),
+                            "intent" to intent,
+                            "fsmResult" to "SUCCESS",
+                            "afterStage" to result.newState.stage,
+                            "persisted" to true
+                        )
                         Log.d("TaskTransition", "source=$source result=SUCCESS newStage=${result.newState.stage}")
                         IntentActionResult.Success(result.newState)
                     }
                     is TaskTransitionResult.Invalid -> {
+                        TaskTrace.d(
+                            "event" to "task_action_result",
+                            "source" to source,
+                            "taskId" to TaskTrace.taskId(state),
+                            "intent" to intent,
+                            "fsmResult" to "INVALID",
+                            "reason" to result.reason,
+                            "suggestedNextAction" to result.suggestedNextAction,
+                            "afterStage" to state.stage,
+                            "persisted" to false
+                        )
                         Log.d("TaskTransition", "source=$source result=INVALID reason=${result.reason}")
                         IntentActionResult.Invalid(result.reason, result.suggestedNextAction)
                     }
@@ -721,6 +857,16 @@ class ChatAgent @Inject constructor(
                     )
                 } else {
                     val next = taskManager.nextTaskStep()
+                    val afterStage = next?.stage ?: state.stage
+                    TaskTrace.d(
+                        "event" to "task_action_result",
+                        "source" to source,
+                        "taskId" to TaskTrace.taskId(next ?: state),
+                        "intent" to intent,
+                        "fsmResult" to if (next?.stage == state.stage) "INVALID" else "SUCCESS",
+                        "afterStage" to afterStage,
+                        "persisted" to true
+                    )
                     Log.d("TaskTransition", "source=$source result=SUCCESS newStage=${next?.stage}")
                     IntentActionResult.Success(next)
                 }
@@ -729,10 +875,30 @@ class ChatAgent @Inject constructor(
                 val result = taskManager.attemptTransition(TaskStage.VALIDATION)
                 when (result) {
                     is TaskTransitionResult.Success -> {
+                        TaskTrace.d(
+                            "event" to "task_action_result",
+                            "source" to source,
+                            "taskId" to TaskTrace.taskId(result.newState),
+                            "intent" to intent,
+                            "fsmResult" to "SUCCESS",
+                            "afterStage" to result.newState.stage,
+                            "persisted" to true
+                        )
                         Log.d("TaskTransition", "source=$source result=SUCCESS newStage=${result.newState.stage}")
                         IntentActionResult.Success(result.newState)
                     }
                     is TaskTransitionResult.Invalid -> {
+                        TaskTrace.d(
+                            "event" to "task_action_result",
+                            "source" to source,
+                            "taskId" to TaskTrace.taskId(state),
+                            "intent" to intent,
+                            "fsmResult" to "INVALID",
+                            "reason" to result.reason,
+                            "suggestedNextAction" to result.suggestedNextAction,
+                            "afterStage" to state.stage,
+                            "persisted" to false
+                        )
                         Log.d("TaskTransition", "source=$source result=INVALID reason=${result.reason}")
                         IntentActionResult.Invalid(result.reason, result.suggestedNextAction)
                     }
@@ -742,10 +908,30 @@ class ChatAgent @Inject constructor(
                 val result = taskManager.attemptTransition(TaskStage.DONE)
                 when (result) {
                     is TaskTransitionResult.Success -> {
+                        TaskTrace.d(
+                            "event" to "task_action_result",
+                            "source" to source,
+                            "taskId" to TaskTrace.taskId(result.newState),
+                            "intent" to intent,
+                            "fsmResult" to "SUCCESS",
+                            "afterStage" to result.newState.stage,
+                            "persisted" to true
+                        )
                         Log.d("TaskTransition", "source=$source result=SUCCESS newStage=${result.newState.stage}")
                         IntentActionResult.Success(result.newState)
                     }
                     is TaskTransitionResult.Invalid -> {
+                        TaskTrace.d(
+                            "event" to "task_action_result",
+                            "source" to source,
+                            "taskId" to TaskTrace.taskId(state),
+                            "intent" to intent,
+                            "fsmResult" to "INVALID",
+                            "reason" to result.reason,
+                            "suggestedNextAction" to result.suggestedNextAction,
+                            "afterStage" to state.stage,
+                            "persisted" to false
+                        )
                         Log.d("TaskTransition", "source=$source result=INVALID reason=${result.reason}")
                         IntentActionResult.Invalid(result.reason, result.suggestedNextAction)
                     }
@@ -753,6 +939,16 @@ class ChatAgent @Inject constructor(
             }
             TaskChatIntent.CANCEL_TASK -> {
                 val cancelled = taskManager.cancelTask()
+                val afterStage = cancelled?.stage ?: state.stage
+                TaskTrace.d(
+                    "event" to "task_action_result",
+                    "source" to source,
+                    "taskId" to TaskTrace.taskId(cancelled ?: state),
+                    "intent" to intent,
+                    "fsmResult" to "SUCCESS",
+                    "afterStage" to afterStage,
+                    "persisted" to true
+                )
                 Log.d("TaskTransition", "source=$source result=SUCCESS newStage=${cancelled?.stage}")
                 IntentActionResult.Success(cancelled)
             }

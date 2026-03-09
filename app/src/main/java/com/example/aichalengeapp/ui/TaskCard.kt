@@ -13,11 +13,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.aichalengeapp.agent.task.TaskStage
 import com.example.aichalengeapp.agent.task.TaskState
 import com.example.aichalengeapp.agent.task.stageToStep
+import com.example.aichalengeapp.debug.TaskTrace
 
 @Composable
 fun TaskCard(
@@ -29,6 +31,16 @@ fun TaskCard(
     onCancel: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    LaunchedEffect(taskState.stage, taskState.paused) {
+        TaskTrace.d(
+            "event" to "ui_task_card_render",
+            "source" to "compose",
+            "taskId" to TaskTrace.taskId(taskState),
+            "uiStage" to taskState.stage,
+            "paused" to taskState.paused,
+            "panelVisible" to true
+        )
+    }
     Card(
         modifier = modifier
             .fillMaxWidth()

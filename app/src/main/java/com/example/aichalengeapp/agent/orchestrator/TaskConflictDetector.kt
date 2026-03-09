@@ -11,7 +11,7 @@ class TaskConflictDetector @Inject constructor() {
         requestKind: RequestKind,
         hasTransitionIntent: Boolean
     ): Boolean {
-        if (requestKind != RequestKind.COMPLEX) return false
+        if (requestKind == RequestKind.SIMPLE) return false
 
         val normalized = incomingMessage.trim().lowercase()
         if (normalized.isEmpty()) return false

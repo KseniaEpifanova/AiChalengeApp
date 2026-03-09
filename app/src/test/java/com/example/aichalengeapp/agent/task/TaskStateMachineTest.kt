@@ -67,6 +67,16 @@ class TaskStateMachineTest {
     }
 
     @Test
+    fun `valid transition still works after invalid attempt`() {
+        val execution = TaskState(goal = "Goal", stage = TaskStage.EXECUTION, planApproved = true)
+        val invalid = machine.transition(execution, TaskStage.DONE)
+        assertTrue(invalid is TaskTransitionResult.Invalid)
+        val valid = machine.transition(execution, TaskStage.VALIDATION)
+        assertTrue(valid is TaskTransitionResult.Success)
+        assertEquals(TaskStage.EXECUTION, execution.stage)
+    }
+
+    @Test
     fun `pause resume preserves stage`() {
         val execution = TaskState(goal = "Goal", stage = TaskStage.EXECUTION)
         val paused = machine.pause(execution)

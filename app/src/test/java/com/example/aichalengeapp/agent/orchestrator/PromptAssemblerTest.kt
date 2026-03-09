@@ -53,4 +53,22 @@ class PromptAssemblerTest {
         assertTrue(prompt.contains("TASK LIFECYCLE"))
         assertTrue(prompt.contains("EXECUTION"))
     }
+
+    @Test
+    fun `uses validation response contract when stage is validation`() {
+        val prompt = assembler.assemble(
+            basePrompt = "Base",
+            profile = AssistantProfile.default(),
+            invariants = InvariantsProfile(),
+            taskState = TaskState(goal = "G", stage = TaskStage.VALIDATION),
+            longTermJson = "{}",
+            workingJson = "{}"
+        )
+
+        assertTrue(prompt.contains("STRICT STAGE CONTRACT"))
+        assertTrue(prompt.contains("Current task stage: VALIDATION"))
+        assertTrue(prompt.contains("Allowed behavior in VALIDATION"))
+        assertTrue(prompt.contains("Forbidden behavior in VALIDATION"))
+        assertTrue(prompt.contains("do not continue implementation"))
+    }
 }

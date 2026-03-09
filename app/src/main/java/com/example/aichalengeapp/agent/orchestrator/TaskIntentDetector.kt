@@ -4,6 +4,7 @@ import com.example.aichalengeapp.agent.profile.AssistantProfile
 import com.example.aichalengeapp.agent.task.TaskState
 import com.example.aichalengeapp.data.AgentMessage
 import com.example.aichalengeapp.data.AgentRole
+import com.example.aichalengeapp.debug.TaskTrace
 import com.example.aichalengeapp.repo.ChatRepository
 import javax.inject.Inject
 
@@ -19,7 +20,8 @@ class TaskIntentDetector @Inject constructor(
     suspend fun detect(
         message: String,
         activeProfile: AssistantProfile,
-        taskState: TaskState?
+        taskState: TaskState?,
+        source: String = "chat"
     ): IntentDecision {
         val normalized = message.trim()
         if (normalized.isEmpty()) {
@@ -86,6 +88,17 @@ class TaskIntentDetector @Inject constructor(
 
         val raw = result.text.trim().lineSequence().firstOrNull().orEmpty()
         val parsed = parseIntent(raw)
+        TaskTrace.d(
+            "event" to "intent_detected",
+            "source" to source,
+            "taskId" to TaskTrace.taskId(taskState),
+            "msg" to normalized,
+            "profileId" to activeProfile.id,
+            "profileName" to activeProfile.name,
+            "beforeStage" to taskState?.stage,
+            "intent" to parsed,
+            "rawIntent" to raw
+        )
         return IntentDecision(parsed, raw)
     }
 

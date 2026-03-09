@@ -39,12 +39,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import android.util.Log
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.aichalengeapp.debug.TaskTrace
 import com.example.aichalengeapp.vm.ChatViewModel
 import kotlinx.coroutines.launch
 
@@ -96,7 +96,14 @@ fun ChatScreen(
     }
     LaunchedEffect(taskState?.stage, taskState?.paused) {
         val visible = isTaskPanelVisible(taskState)
-        Log.d("TaskPanelVisibility", "composeState stage=${taskState?.stage} paused=${taskState?.paused} visible=$visible")
+        TaskTrace.d(
+            "event" to "ui_panel_render",
+            "source" to "compose",
+            "taskId" to TaskTrace.taskId(taskState),
+            "uiStage" to taskState?.stage,
+            "paused" to taskState?.paused,
+            "panelVisible" to visible
+        )
     }
 
     ModalNavigationDrawer(

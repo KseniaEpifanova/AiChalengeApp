@@ -1,6 +1,7 @@
 package com.example.aichalengeapp.agent.task
 
 import com.example.aichalengeapp.agent.memory.WorkingMemoryStore
+import com.example.aichalengeapp.debug.TaskTrace
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -30,13 +31,40 @@ class TaskManager @Inject constructor(
             planApproved = false
         )
         persistTaskStateInternal(state)
+        TaskTrace.d(
+            "event" to "task_started",
+            "source" to "auto_or_manual",
+            "taskId" to TaskTrace.taskId(state),
+            "msg" to goal.trim(),
+            "afterStage" to state.stage,
+            "afterApproved" to state.planApproved,
+            "paused" to state.paused,
+            "persisted" to true
+        )
         state
     }
 
     suspend fun nextTaskStep(): TaskState? = mutex.withLock {
         val current = loadTaskStateInternal() ?: return@withLock null
+        TaskTrace.d(
+            "event" to "task_next_attempt",
+            "source" to "button_or_intent",
+            "taskId" to TaskTrace.taskId(current),
+            "beforeStage" to current.stage,
+            "beforeApproved" to current.planApproved,
+            "paused" to current.paused,
+            "action" to "NEXT"
+        )
         if (current.paused || current.stage == TaskStage.DONE || current.stage == TaskStage.CANCELLED) {
             persistTaskStateInternal(current)
+            TaskTrace.d(
+                "event" to "task_next_result",
+                "taskId" to TaskTrace.taskId(current),
+                "fsmResult" to "INVALID",
+                "reason" to "Task is paused or terminal",
+                "afterStage" to current.stage,
+                "persisted" to true
+            )
             return@withLock current
         }
         val next = when (current.stage) {
@@ -48,16 +76,51 @@ class TaskManager @Inject constructor(
             TaskStage.DONE, TaskStage.CANCELLED -> current
         }
         persistTaskStateInternal(next)
+        TaskTrace.d(
+            "event" to "task_next_result",
+            "taskId" to TaskTrace.taskId(next),
+            "fsmResult" to if (next.stage == current.stage) "INVALID" else "SUCCESS",
+            "afterStage" to next.stage,
+            "afterApproved" to next.planApproved,
+            "persisted" to true
+        )
         next
     }
 
     suspend fun attemptTransition(to: TaskStage): TaskTransitionResult = mutex.withLock {
         val current = loadTaskStateInternal()
             ?: return@withLock TaskTransitionResult.Invalid("No active task", "Start a task first")
+        TaskTrace.d(
+            "event" to "task_transition_attempt",
+            "taskId" to TaskTrace.taskId(current),
+            "beforeStage" to current.stage,
+            "beforeApproved" to current.planApproved,
+            "paused" to current.paused,
+            "requestedTarget" to to,
+            "fsmValidationCalled" to true
+        )
 
         val result = stateMachine.transition(current, to)
         if (result is TaskTransitionResult.Success) {
             persistTaskStateInternal(result.newState)
+            TaskTrace.d(
+                "event" to "task_transition_result",
+                "taskId" to TaskTrace.taskId(result.newState),
+                "fsmResult" to "SUCCESS",
+                "afterStage" to result.newState.stage,
+                "afterApproved" to result.newState.planApproved,
+                "persisted" to true
+            )
+        } else if (result is TaskTransitionResult.Invalid) {
+            TaskTrace.d(
+                "event" to "task_transition_result",
+                "taskId" to TaskTrace.taskId(current),
+                "fsmResult" to "INVALID",
+                "reason" to result.reason,
+                "suggestedNextAction" to result.suggestedNextAction,
+                "afterStage" to current.stage,
+                "persisted" to false
+            )
         }
         result
     }
@@ -66,6 +129,14 @@ class TaskManager @Inject constructor(
         val current = loadTaskStateInternal() ?: return@withLock null
         val approved = stateMachine.approvePlan(current)
         persistTaskStateInternal(approved)
+        TaskTrace.d(
+            "event" to "task_plan_approved",
+            "taskId" to TaskTrace.taskId(approved),
+            "beforeStage" to current.stage,
+            "afterStage" to approved.stage,
+            "afterApproved" to approved.planApproved,
+            "persisted" to true
+        )
         approved
     }
 
@@ -73,6 +144,14 @@ class TaskManager @Inject constructor(
         val current = loadTaskStateInternal() ?: return@withLock null
         val updated = stateMachine.pause(current)
         persistTaskStateInternal(updated)
+        TaskTrace.d(
+            "event" to "task_paused",
+            "taskId" to TaskTrace.taskId(updated),
+            "beforeStage" to current.stage,
+            "afterStage" to updated.stage,
+            "paused" to updated.paused,
+            "persisted" to true
+        )
         updated
     }
 
@@ -80,6 +159,14 @@ class TaskManager @Inject constructor(
         val current = loadTaskStateInternal() ?: return@withLock null
         val updated = stateMachine.resume(current)
         persistTaskStateInternal(updated)
+        TaskTrace.d(
+            "event" to "task_resumed",
+            "taskId" to TaskTrace.taskId(updated),
+            "beforeStage" to current.stage,
+            "afterStage" to updated.stage,
+            "paused" to updated.paused,
+            "persisted" to true
+        )
         updated
     }
 
@@ -88,11 +175,26 @@ class TaskManager @Inject constructor(
         val result = stateMachine.transition(current, TaskStage.CANCELLED)
         val updated = if (result is TaskTransitionResult.Success) result.newState else current
         persistTaskStateInternal(updated)
+        TaskTrace.d(
+            "event" to "task_cancelled",
+            "taskId" to TaskTrace.taskId(updated),
+            "beforeStage" to current.stage,
+            "afterStage" to updated.stage,
+            "fsmResult" to if (result is TaskTransitionResult.Success) "SUCCESS" else "INVALID",
+            "persisted" to true
+        )
         updated
     }
 
     suspend fun stopTask() = mutex.withLock {
+        val current = loadTaskStateInternal()
         clearTaskStateInternal()
+        TaskTrace.d(
+            "event" to "task_stopped",
+            "taskId" to TaskTrace.taskId(current),
+            "beforeStage" to current?.stage,
+            "persisted" to true
+        )
     }
 
     private fun transitionOrSame(state: TaskState, to: TaskStage): TaskState {
