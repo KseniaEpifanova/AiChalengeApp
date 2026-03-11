@@ -21,9 +21,11 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         val deepSeekApiKey = (project.findProperty("DEEPSEEK_API_KEY") as String?) ?: ""
         val deepSeekBaseUrl = (project.findProperty("DEEPSEEK_BASE_URL") as String?) ?: "https://api.deepseek.com/v1/"
+        val mcpBaseUrl = (project.findProperty("MCP_BASE_URL") as String?) ?: "https://prompts.chat/api/mcp"
 
         buildConfigField("String", "DEEPSEEK_API_KEY", "\"$deepSeekApiKey\"")
         buildConfigField("String", "DEEPSEEK_BASE_URL", "\"$deepSeekBaseUrl\"")
+        buildConfigField("String", "MCP_BASE_URL", "\"$mcpBaseUrl\"")
     }
 
     buildTypes {
@@ -79,6 +81,7 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
 
     implementation(libs.androidx.hilt.navigation.compose)
+    implementation(libs.mcp.kotlin.sdk)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

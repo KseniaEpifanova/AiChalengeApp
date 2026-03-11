@@ -46,19 +46,22 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.aichalengeapp.debug.TaskTrace
 import com.example.aichalengeapp.vm.ChatViewModel
+import com.example.aichalengeapp.vm.McpViewModel
 import kotlinx.coroutines.launch
 
 private enum class MainDestination {
     CHAT,
     PROFILES,
     INVARIANT_GUARD,
-    SETTINGS
+    SETTINGS,
+    MCP_DEBUG
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
-    viewModel: ChatViewModel = hiltViewModel()
+    viewModel: ChatViewModel = hiltViewModel(),
+    mcpViewModel: McpViewModel = hiltViewModel()
 ) {
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
@@ -71,6 +74,7 @@ fun ChatScreen(
     val invariantsProfile by viewModel.invariantsProfile.collectAsStateWithLifecycle()
     val invariantsDirty by viewModel.invariantsDirty.collectAsStateWithLifecycle()
     val guardActive by viewModel.guardActive.collectAsStateWithLifecycle()
+    val mcpUiState by mcpViewModel.uiState.collectAsStateWithLifecycle()
 
     var input by remember { mutableStateOf("") }
     var showClearDialog by rememberSaveable { mutableStateOf(false) }
@@ -146,6 +150,14 @@ fun ChatScreen(
                         scope.launch { drawerState.close() }
                     }
                 )
+                NavigationDrawerItem(
+                    label = { Text("MCP Debug") },
+                    selected = destination == MainDestination.MCP_DEBUG,
+                    onClick = {
+                        destination = MainDestination.MCP_DEBUG
+                        scope.launch { drawerState.close() }
+                    }
+                )
             }
         }
     ) {
@@ -158,6 +170,7 @@ fun ChatScreen(
                             MainDestination.PROFILES -> "Profiles"
                             MainDestination.INVARIANT_GUARD -> "Invariant Guard"
                             MainDestination.SETTINGS -> "Settings"
+                            MainDestination.MCP_DEBUG -> "MCP Debug"
                         }
                         Text(title)
                     },
@@ -233,6 +246,15 @@ fun ChatScreen(
                         onBusinessRulesChange = viewModel::updateInvariantBusinessRules,
                         onSave = viewModel::saveInvariants,
                         onClear = viewModel::clearInvariants,
+                        modifier = Modifier.padding(innerPadding)
+                    )
+                }
+
+                MainDestination.MCP_DEBUG -> {
+                    McpDebugScreen(
+                        state = mcpUiState,
+                        onConnectAndLoad = mcpViewModel::connectAndLoadTools,
+                        onDisconnect = mcpViewModel::disconnect,
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
