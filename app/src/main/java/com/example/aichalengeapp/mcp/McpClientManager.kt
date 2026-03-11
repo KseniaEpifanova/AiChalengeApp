@@ -10,6 +10,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -123,6 +124,41 @@ class McpClientManager @Inject constructor(
         McpTrace.d("event" to "tools_list_failure", "error" to (it.message ?: it::class.java.simpleName))
     }
 
+    suspend fun callTool(
+        toolName: String,
+        arguments: JSONObject
+    ): Result<JSONObject> = runCatching {
+        mutex.withLock {
+            val remoteEndpoint = endpoint ?: error("MCP is not connected. Call connect() first.")
+            val normalizedTool = toolName.trim()
+            if (normalizedTool.isEmpty()) error("Tool name is blank")
+            McpTrace.d("event" to "tool_call_start", "tool" to normalizedTool, "args" to arguments.toString())
+
+            val payload = JSONObject()
+                .put("jsonrpc", "2.0")
+                .put("id", idCounter.getAndIncrement())
+                .put("method", "tools/call")
+                .put(
+                    "params",
+                    JSONObject()
+                        .put("name", normalizedTool)
+                        .put("arguments", arguments)
+                )
+
+            val response = postJson(remoteEndpoint, payload, sessionId)
+            val json = parseProtocolJson(response.body)
+            if (json.has("error")) {
+                error("MCP tools/call error: ${json.getJSONObject("error").optString("message", "unknown")}")
+            }
+
+            val result = json.optJSONObject("result") ?: JSONObject()
+            McpTrace.d("event" to "tool_call_success", "tool" to normalizedTool, "hasResult" to (result.length() > 0))
+            result
+        }
+    }.onFailure {
+        McpTrace.d("event" to "tool_call_failure", "tool" to toolName, "error" to (it.message ?: it::class.java.simpleName))
+    }
+
     suspend fun disconnect() {
         mutex.withLock {
             endpoint = null
@@ -206,6 +242,19 @@ class McpClientManager @Inject constructor(
             payloads += current.toString()
         }
         return payloads
+    }
+
+    fun extractTextContent(result: JSONObject): String? {
+        val content = result.optJSONArray("content") ?: return null
+        for (i in 0 until content.length()) {
+            val item = content.optJSONObject(i) ?: continue
+            val type = item.optString("type", "").lowercase(Locale.US)
+            if (type == "text") {
+                val text = item.optString("text", "").trim()
+                if (text.isNotEmpty()) return text
+            }
+        }
+        return null
     }
 
     private data class HttpResult(

@@ -32,6 +32,10 @@ import com.example.aichalengeapp.agent.task.TaskStateMachine
 import com.example.aichalengeapp.agent.task.TaskPlanner
 import com.example.aichalengeapp.data.AgentMessage
 import com.example.aichalengeapp.data.LlmResult
+import com.example.aichalengeapp.mcp.currency.CurrencyRequestParser
+import com.example.aichalengeapp.mcp.currency.CurrencyToolResponse
+import com.example.aichalengeapp.mcp.currency.CurrencyToolRouter
+import com.example.aichalengeapp.mcp.currency.McpCurrencyService
 import com.example.aichalengeapp.repo.ChatRepository
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -181,6 +185,15 @@ class ChatAgentTest {
         assertTrue(reply.text.contains("stage is still EXECUTION"))
     }
 
+    @Test
+    fun `currency request uses mcp tool path and skips llm`() = runSuspending {
+        val fixture = fixture("LLM fallback")
+        fixture.agent.init()
+
+        val reply = fixture.agent.handleUserMessage("Сколько будет 100 EUR в USD?", StrategyConfig.SlidingWindow())
+        assertTrue(reply.debugLabel == "mcp-currency")
+    }
+
     private fun runSuspending(block: suspend () -> Unit) = runBlocking {
         withTimeout(5_000) {
             block()
@@ -227,7 +240,24 @@ class ChatAgentTest {
             profileResolver = ProfileResolver(),
             orchestrator = AgentOrchestrator(ProfileResolver(), RequestClassifier(), PromptAssembler()),
             taskConflictDetector = TaskConflictDetector(),
-            taskIntentDetector = TaskIntentDetector(repo)
+            taskIntentDetector = TaskIntentDetector(repo),
+            currencyToolRouter = CurrencyToolRouter(CurrencyRequestParser()),
+            mcpCurrencyService = object : McpCurrencyService {
+                override suspend fun getExchangeRate(base: String, target: String, amount: Double?): CurrencyToolResponse {
+                    return if (base.equals("EUR", ignoreCase = true) && target.equals("USD", ignoreCase = true)) {
+                        CurrencyToolResponse.Success(
+                            base = "EUR",
+                            target = "USD",
+                            amountRequested = amount ?: 1.0,
+                            convertedAmount = if (amount == null) 1.08 else amount * 1.08,
+                            rate = 1.08,
+                            date = "2026-03-10"
+                        )
+                    } else {
+                        CurrencyToolResponse.InvalidCurrency(base, target)
+                    }
+                }
+            }
         )
 
         return Fixture(agent, repo)

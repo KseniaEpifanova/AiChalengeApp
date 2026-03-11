@@ -29,11 +29,15 @@ import com.example.aichalengeapp.agent.task.TaskTransitionResult
 import com.example.aichalengeapp.data.AgentMessage
 import com.example.aichalengeapp.data.AgentRole
 import com.example.aichalengeapp.debug.TaskTrace
+import com.example.aichalengeapp.mcp.currency.CurrencyToolResponse
+import com.example.aichalengeapp.mcp.currency.CurrencyToolRouter
+import com.example.aichalengeapp.mcp.currency.McpCurrencyService
 import com.example.aichalengeapp.repo.ChatRepository
 import android.util.Log
 import dagger.hilt.android.scopes.ViewModelScoped
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.util.Locale
 import javax.inject.Inject
 
 @ViewModelScoped
@@ -53,7 +57,9 @@ class ChatAgent @Inject constructor(
     private val profileResolver: ProfileResolver,
     private val orchestrator: AgentOrchestrator,
     private val taskConflictDetector: TaskConflictDetector,
-    private val taskIntentDetector: TaskIntentDetector
+    private val taskIntentDetector: TaskIntentDetector,
+    private val currencyToolRouter: CurrencyToolRouter,
+    private val mcpCurrencyService: McpCurrencyService
 ) {
     private companion object {
         private const val TAG = "TaskClassifier"
@@ -330,6 +336,32 @@ class ChatAgent @Inject constructor(
         val trimmed = userText.trim()
         if (trimmed.isEmpty()) {
             return AgentReply("", TokenMetrics(0, 0, 0, null, null, null, null))
+        }
+
+        if (forcedIntent == null && transitionSource == "chat") {
+            val currencyIntent = currencyToolRouter.route(trimmed)
+            if (currencyIntent != null) {
+                appendUserMessage(strategyConfig, trimmed)
+                if (strategyConfig is StrategyConfig.StickyFacts) {
+                    val updatedFacts = factsUpdater.updateFacts(shortTerm.factsJson, trimmed)
+                    shortTerm = shortTerm.copy(factsJson = updatedFacts)
+                }
+                shortTermStore.save(shortTerm)
+
+                val currencyResponse = mcpCurrencyService.getExchangeRate(
+                    base = currencyIntent.base,
+                    target = currencyIntent.target,
+                    amount = currencyIntent.amount
+                )
+                val text = formatCurrencyReply(currencyResponse)
+                appendAssistantMessage(strategyConfig, text)
+                shortTermStore.save(shortTerm)
+                return AgentReply(
+                    text = text,
+                    metrics = TokenMetrics(0, 0, 0, null, null, null, null),
+                    debugLabel = "mcp-currency"
+                )
+            }
         }
 
         var taskState = taskManager.getTaskState()
@@ -983,6 +1015,35 @@ class ChatAgent @Inject constructor(
 
     private fun isActiveTask(state: TaskState?): Boolean {
         return state != null && state.stage != TaskStage.DONE && state.stage != TaskStage.CANCELLED
+    }
+
+    private fun formatCurrencyReply(response: CurrencyToolResponse): String {
+        return when (response) {
+            is CurrencyToolResponse.InvalidCurrency -> {
+                "Не удалось получить курс для пары ${response.base} → ${response.target}. Проверь код валюты."
+            }
+            is CurrencyToolResponse.Failure -> response.message
+            is CurrencyToolResponse.Success -> {
+                val amountRequested = response.amountRequested ?: 1.0
+                val converted = response.convertedAmount
+                val rate = response.rate
+                if (converted != null) {
+                    "${trimTrailingZeros(amountRequested)} ${response.base} ≈ ${trimTrailingZeros(converted)} ${response.target} по текущему курсу."
+                } else if (rate != null) {
+                    "Курс ${response.base} → ${response.target}: ${trimTrailingZeros(rate)}."
+                } else {
+                    "Получен курс ${response.base} → ${response.target}."
+                }
+            }
+        }
+    }
+
+    private fun trimTrailingZeros(value: Double): String {
+        return if (value % 1.0 == 0.0) {
+            value.toLong().toString()
+        } else {
+            String.format(Locale.US, "%.4f", value).trimEnd('0').trimEnd('.')
+        }
     }
 
 }

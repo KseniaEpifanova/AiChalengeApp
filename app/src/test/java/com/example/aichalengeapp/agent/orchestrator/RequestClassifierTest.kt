@@ -46,8 +46,8 @@ class RequestClassifierTest {
     }
 
     @Test
-    fun `weather question is simple for mobile developer high`() {
-        val decision = classifier.classifyForProfile("Какая сегодня погода?", mobileDeveloper())
+    fun `quick question is simple for mobile developer high`() {
+        val decision = classifier.classifyForProfile("Который сейчас час?", mobileDeveloper())
         assertEquals(RequestKind.SIMPLE, decision.kind)
     }
 

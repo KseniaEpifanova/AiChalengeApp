@@ -24,7 +24,7 @@ class AgentOrchestratorTest {
             invariants = InvariantsProfile(),
             taskState = TaskState(goal = "G", stage = TaskStage.EXECUTION),
             strategyConfig = StrategyConfig.SlidingWindow(),
-            message = "what is weather",
+            message = "what is UTC time now",
             longTermJson = "{}",
             workingJson = "{}"
         )
