@@ -26,10 +26,26 @@ class CurrencyRequestParser @Inject constructor() {
         "rub" to "RUB"
     )
 
+    private val summaryKeywords = listOf(
+        "сводка",
+        "сводку",
+        "summary",
+        "статистик",
+        "статистика",
+        "анализ",
+        "history",
+        "истори",
+        "min",
+        "max",
+        "average",
+        "средн"
+    )
+
     fun parseIntent(raw: String): CurrencyToolIntent? {
         val text = raw.trim()
         if (text.isEmpty()) return null
 
+        val isSummary = containsSummaryKeyword(text)
         val upper = text.uppercase()
         val codeHits = codeRegex.findAll(upper)
             .map { it.groupValues[1].uppercase() }
@@ -42,7 +58,8 @@ class CurrencyRequestParser @Inject constructor() {
             return CurrencyToolIntent(
                 base = codeHits[0],
                 target = codeHits[1],
-                amount = amount
+                amount = if (isSummary) null else amount,
+                isSummary = isSummary
             )
         }
 
@@ -57,11 +74,17 @@ class CurrencyRequestParser @Inject constructor() {
             return CurrencyToolIntent(
                 base = namedHits[0],
                 target = namedHits[1],
-                amount = amount
+                amount = if (isSummary) null else amount,
+                isSummary = isSummary
             )
         }
 
         return null
+    }
+
+    private fun containsSummaryKeyword(text: String): Boolean {
+        val lowered = text.lowercase()
+        return summaryKeywords.any { lowered.contains(it) }
     }
 
     private fun String.toDoubleOrNullFlexible(): Double? {

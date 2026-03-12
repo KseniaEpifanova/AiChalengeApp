@@ -348,11 +348,18 @@ class ChatAgent @Inject constructor(
                 }
                 shortTermStore.save(shortTerm)
 
-                val currencyResponse = mcpCurrencyService.getExchangeRate(
-                    base = currencyIntent.base,
-                    target = currencyIntent.target,
-                    amount = currencyIntent.amount
-                )
+                val currencyResponse = if (currencyIntent.isSummary) {
+                    mcpCurrencyService.getExchangeRateSummary(
+                        base = currencyIntent.base,
+                        target = currencyIntent.target
+                    )
+                } else {
+                    mcpCurrencyService.getExchangeRate(
+                        base = currencyIntent.base,
+                        target = currencyIntent.target,
+                        amount = currencyIntent.amount
+                    )
+                }
                 val text = formatCurrencyReply(currencyResponse)
                 appendAssistantMessage(strategyConfig, text)
                 shortTermStore.save(shortTerm)
@@ -1034,6 +1041,16 @@ class ChatAgent @Inject constructor(
                 } else {
                     "Получен курс ${response.base} → ${response.target}."
                 }
+            }
+            is CurrencyToolResponse.Summary -> {
+                if (response.sampleCount == 0) {
+                    return "Пока нет собранных данных для ${response.base}/${response.target}. Попробуй позже или запроси принудительный сбор."
+                }
+                val latest = response.latestRate?.let { trimTrailingZeros(it) } ?: "N/A"
+                val min = response.minRate?.let { trimTrailingZeros(it) } ?: "N/A"
+                val max = response.maxRate?.let { trimTrailingZeros(it) } ?: "N/A"
+                val avg = response.averageRate?.let { trimTrailingZeros(it) } ?: "N/A"
+                "Сводка по ${response.base}/${response.target}: собрано ${response.sampleCount} значений. Последний курс: $latest, минимум: $min, максимум: $max, средний: $avg."
             }
         }
     }

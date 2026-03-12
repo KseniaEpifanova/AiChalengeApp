@@ -10,6 +10,17 @@ sealed class CurrencyToolResponse {
         val date: String?
     ) : CurrencyToolResponse()
 
+    data class Summary(
+        val base: String,
+        val target: String,
+        val sampleCount: Int,
+        val latestRate: Double?,
+        val minRate: Double?,
+        val maxRate: Double?,
+        val averageRate: Double?,
+        val latestTimestamp: String?
+    ) : CurrencyToolResponse()
+
     data class InvalidCurrency(
         val base: String,
         val target: String

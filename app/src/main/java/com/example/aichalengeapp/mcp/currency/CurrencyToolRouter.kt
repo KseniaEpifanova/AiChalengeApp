@@ -39,13 +39,22 @@ class CurrencyToolRouter @Inject constructor(
             return null
         }
 
-        McpTrace.d(
-            "event" to "currency_router_match",
-            "base" to intent.base,
-            "target" to intent.target,
-            "amount" to intent.amount,
-            "message" to normalized
-        )
+        if (intent.isSummary) {
+            McpTrace.d(
+                "event" to "currency_summary_router_match",
+                "base" to intent.base,
+                "target" to intent.target,
+                "message" to normalized
+            )
+        } else {
+            McpTrace.d(
+                "event" to "currency_router_match",
+                "base" to intent.base,
+                "target" to intent.target,
+                "amount" to intent.amount,
+                "message" to normalized
+            )
+        }
         return intent
     }
 }

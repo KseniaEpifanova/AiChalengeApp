@@ -257,6 +257,23 @@ class ChatAgentTest {
                         CurrencyToolResponse.InvalidCurrency(base, target)
                     }
                 }
+
+                override suspend fun getExchangeRateSummary(base: String, target: String): CurrencyToolResponse {
+                    return if (base.equals("EUR", ignoreCase = true) && target.equals("USD", ignoreCase = true)) {
+                        CurrencyToolResponse.Summary(
+                            base = "EUR",
+                            target = "USD",
+                            sampleCount = 3,
+                            latestRate = 1.0842,
+                            minRate = 1.0810,
+                            maxRate = 1.0861,
+                            averageRate = 1.0837,
+                            latestTimestamp = "2026-03-11T10:00:00.000Z"
+                        )
+                    } else {
+                        CurrencyToolResponse.Failure("No data for $base/$target")
+                    }
+                }
             }
         )
 

@@ -98,6 +98,80 @@ class McpRepository @Inject constructor(
         return success
     }
 
+    suspend fun callExchangeRateSummaryTool(
+        base: String,
+        target: String
+    ): CurrencyToolResponse {
+        val args = buildMap {
+            put("base", normalizeCurrency(base))
+            put("target", normalizeCurrency(target))
+        }
+        McpTrace.d("event" to "currency_tool_call_start", "tool" to "get_exchange_rate_summary", "base" to args["base"], "target" to args["target"])
+
+        val connected = connect()
+        if (connected.isFailure) {
+            McpTrace.d("event" to "currency_tool_call_failure", "reason" to "connect_failed", "tool" to "get_exchange_rate_summary")
+            return CurrencyToolResponse.Failure("Не удалось получить сводку сейчас. Попробуй позже.")
+        }
+
+        McpTrace.d("event" to "tool_call_payload", "tool" to "get_exchange_rate_summary", "args" to args)
+        val result = callTool(
+            toolName = "get_exchange_rate_summary",
+            arguments = JSONObject(args)
+        ).getOrElse {
+            McpTrace.d("event" to "currency_tool_call_failure", "reason" to "tool_call_transport_error", "error" to (it.message ?: it::class.java.simpleName), "tool" to "get_exchange_rate_summary")
+            return CurrencyToolResponse.Failure("Не удалось получить сводку сейчас. Попробуй позже.")
+        }
+
+        val textContent = manager.extractTextContent(result).orEmpty()
+        if (result.optBoolean("isError", false)) {
+            McpTrace.d("event" to "currency_tool_call_failure", "reason" to "tool_error", "message" to textContent, "tool" to "get_exchange_rate_summary")
+            return CurrencyToolResponse.Failure("Не удалось получить сводку сейчас. Попробуй позже.")
+        }
+
+        val payload = result.optJSONObject("structuredContent")
+            ?: runCatching { JSONObject(textContent) }.getOrNull()
+        if (payload == null) {
+            McpTrace.d("event" to "currency_tool_call_failure", "reason" to "payload_unparseable", "rawResult" to result.toString(), "tool" to "get_exchange_rate_summary")
+            return CurrencyToolResponse.Failure("Не удалось получить сводку сейчас. Попробуй позже.")
+        }
+
+        if (!payload.optBoolean("ok", true)) {
+            val errorCode = payload.optString("error", "")
+            val message = payload.optString("message", "")
+            McpTrace.d("event" to "currency_tool_call_failure", "reason" to "payload_error", "errorCode" to errorCode, "message" to message, "tool" to "get_exchange_rate_summary")
+            return CurrencyToolResponse.Failure("Не удалось получить сводку сейчас. Попробуй позже.")
+        }
+
+        val baseCode = payload.optString("base", args["base"] as? String ?: "")
+        val targetCode = payload.optString("target", args["target"] as? String ?: "")
+        val sampleCount = payload.optInt("sampleCount", 0)
+        val latestRate = payload.optDouble("latestRate").takeUnless { it.isNaN() }
+        val minRate = payload.optDouble("minRate").takeUnless { it.isNaN() }
+        val maxRate = payload.optDouble("maxRate").takeUnless { it.isNaN() }
+        val averageRate = payload.optDouble("averageRate").takeUnless { it.isNaN() }
+        val latestTimestamp = payload.optString("latestTimestamp").ifBlank { null }
+
+        val summary = CurrencyToolResponse.Summary(
+            base = baseCode,
+            target = targetCode,
+            sampleCount = sampleCount,
+            latestRate = latestRate,
+            minRate = minRate,
+            maxRate = maxRate,
+            averageRate = averageRate,
+            latestTimestamp = latestTimestamp
+        )
+        McpTrace.d(
+            "event" to "currency_tool_call_success",
+            "tool" to "get_exchange_rate_summary",
+            "base" to summary.base,
+            "target" to summary.target,
+            "sampleCount" to summary.sampleCount
+        )
+        return summary
+    }
+
     suspend fun disconnect() = manager.disconnect()
 
     internal fun buildExchangeToolArguments(

@@ -10,6 +10,11 @@ interface McpCurrencyService {
         target: String,
         amount: Double?
     ): CurrencyToolResponse
+
+    suspend fun getExchangeRateSummary(
+        base: String,
+        target: String
+    ): CurrencyToolResponse
 }
 
 @Singleton
@@ -22,5 +27,12 @@ class McpCurrencyServiceImpl @Inject constructor(
         amount: Double?
     ): CurrencyToolResponse {
         return mcpRepository.callExchangeRateTool(base = base, target = target, amount = amount)
+    }
+
+    override suspend fun getExchangeRateSummary(
+        base: String,
+        target: String
+    ): CurrencyToolResponse {
+        return mcpRepository.callExchangeRateSummaryTool(base = base, target = target)
     }
 }
