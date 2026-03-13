@@ -32,6 +32,9 @@ import com.example.aichalengeapp.debug.TaskTrace
 import com.example.aichalengeapp.mcp.currency.CurrencyToolResponse
 import com.example.aichalengeapp.mcp.currency.CurrencyToolRouter
 import com.example.aichalengeapp.mcp.currency.McpCurrencyService
+import com.example.aichalengeapp.mcp.pipeline.McpPipelineService
+import com.example.aichalengeapp.mcp.pipeline.PipelineToolResponse
+import com.example.aichalengeapp.mcp.pipeline.PipelineToolRouter
 import com.example.aichalengeapp.repo.ChatRepository
 import android.util.Log
 import dagger.hilt.android.scopes.ViewModelScoped
@@ -58,6 +61,8 @@ class ChatAgent @Inject constructor(
     private val orchestrator: AgentOrchestrator,
     private val taskConflictDetector: TaskConflictDetector,
     private val taskIntentDetector: TaskIntentDetector,
+    private val pipelineToolRouter: PipelineToolRouter,
+    private val mcpPipelineService: McpPipelineService,
     private val currencyToolRouter: CurrencyToolRouter,
     private val mcpCurrencyService: McpCurrencyService
 ) {
@@ -339,6 +344,30 @@ class ChatAgent @Inject constructor(
         }
 
         if (forcedIntent == null && transitionSource == "chat") {
+            val pipelineIntent = pipelineToolRouter.route(trimmed)
+            if (pipelineIntent != null) {
+                appendUserMessage(strategyConfig, trimmed)
+                if (strategyConfig is StrategyConfig.StickyFacts) {
+                    val updatedFacts = factsUpdater.updateFacts(shortTerm.factsJson, trimmed)
+                    shortTerm = shortTerm.copy(factsJson = updatedFacts)
+                }
+                shortTermStore.save(shortTerm)
+
+                val pipelineResponse = mcpPipelineService.runSearchSummaryPipeline(
+                    query = pipelineIntent.query,
+                    filename = pipelineIntent.filename,
+                    limit = pipelineIntent.limit
+                )
+                val text = formatPipelineReply(pipelineResponse)
+                appendAssistantMessage(strategyConfig, text)
+                shortTermStore.save(shortTerm)
+                return AgentReply(
+                    text = text,
+                    metrics = TokenMetrics(0, 0, 0, null, null, null, null),
+                    debugLabel = "mcp-pipeline"
+                )
+            }
+
             val currencyIntent = currencyToolRouter.route(trimmed)
             if (currencyIntent != null) {
                 appendUserMessage(strategyConfig, trimmed)
@@ -1051,6 +1080,20 @@ class ChatAgent @Inject constructor(
                 val max = response.maxRate?.let { trimTrailingZeros(it) } ?: "N/A"
                 val avg = response.averageRate?.let { trimTrailingZeros(it) } ?: "N/A"
                 "Сводка по ${response.base}/${response.target}: собрано ${response.sampleCount} значений. Последний курс: $latest, минимум: $min, максимум: $max, средний: $avg."
+            }
+        }
+    }
+
+    private fun formatPipelineReply(response: PipelineToolResponse): String {
+        return when (response) {
+            is PipelineToolResponse.Failure -> response.message
+            is PipelineToolResponse.NoMatches -> response.message
+            is PipelineToolResponse.Success -> {
+                if (!response.saved || response.savedPath.isNullOrBlank()) {
+                    "Готово. Я нашёл ${response.matchedCount} поста(ов) и сделал краткую сводку: ${response.summary}"
+                } else {
+                    "Готово. Я нашёл ${response.matchedCount} поста(ов), сделал краткую сводку и сохранил результат в файл ${response.savedPath}. Сводка: ${response.summary}"
+                }
             }
         }
     }

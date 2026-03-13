@@ -6,6 +6,8 @@ import com.example.aichalengeapp.mcp.currency.FrankfurterApi
 import com.example.aichalengeapp.mcp.currency.FrankfurterHttpApi
 import com.example.aichalengeapp.mcp.currency.McpCurrencyService
 import com.example.aichalengeapp.mcp.currency.McpCurrencyServiceImpl
+import com.example.aichalengeapp.mcp.pipeline.McpPipelineService
+import com.example.aichalengeapp.mcp.pipeline.McpPipelineServiceImpl
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -27,4 +29,8 @@ object McpModule {
     @Provides
     @Singleton
     fun provideMcpCurrencyService(impl: McpCurrencyServiceImpl): McpCurrencyService = impl
+
+    @Provides
+    @Singleton
+    fun provideMcpPipelineService(impl: McpPipelineServiceImpl): McpPipelineService = impl
 }

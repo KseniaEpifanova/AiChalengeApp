@@ -36,6 +36,9 @@ import com.example.aichalengeapp.mcp.currency.CurrencyRequestParser
 import com.example.aichalengeapp.mcp.currency.CurrencyToolResponse
 import com.example.aichalengeapp.mcp.currency.CurrencyToolRouter
 import com.example.aichalengeapp.mcp.currency.McpCurrencyService
+import com.example.aichalengeapp.mcp.pipeline.McpPipelineService
+import com.example.aichalengeapp.mcp.pipeline.PipelineToolResponse
+import com.example.aichalengeapp.mcp.pipeline.PipelineToolRouter
 import com.example.aichalengeapp.repo.ChatRepository
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -241,6 +244,18 @@ class ChatAgentTest {
             orchestrator = AgentOrchestrator(ProfileResolver(), RequestClassifier(), PromptAssembler()),
             taskConflictDetector = TaskConflictDetector(),
             taskIntentDetector = TaskIntentDetector(repo),
+            pipelineToolRouter = PipelineToolRouter(),
+            mcpPipelineService = object : McpPipelineService {
+                override suspend fun runSearchSummaryPipeline(query: String, filename: String?, limit: Int?): PipelineToolResponse {
+                    return PipelineToolResponse.Success(
+                        query = query,
+                        matchedCount = 2,
+                        summary = "Demo summary for $query",
+                        savedPath = "/tmp/pipeline_output/latest_summary.txt",
+                        saved = true
+                    )
+                }
+            },
             currencyToolRouter = CurrencyToolRouter(CurrencyRequestParser()),
             mcpCurrencyService = object : McpCurrencyService {
                 override suspend fun getExchangeRate(base: String, target: String, amount: Double?): CurrencyToolResponse {

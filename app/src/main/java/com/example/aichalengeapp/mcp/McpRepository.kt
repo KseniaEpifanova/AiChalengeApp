@@ -1,6 +1,7 @@
 package com.example.aichalengeapp.mcp
 
 import com.example.aichalengeapp.mcp.currency.CurrencyToolResponse
+import com.example.aichalengeapp.mcp.pipeline.PipelineToolResponse
 import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -170,6 +171,82 @@ class McpRepository @Inject constructor(
             "sampleCount" to summary.sampleCount
         )
         return summary
+    }
+
+    suspend fun callSearchSummaryPipelineTool(
+        query: String,
+        filename: String?,
+        limit: Int?
+    ): PipelineToolResponse {
+        val args = buildMap<String, Any> {
+            put("query", query.trim())
+            if (!filename.isNullOrBlank()) put("filename", filename.trim())
+            if (limit != null) put("limit", limit)
+        }
+
+        McpTrace.d("event" to "pipeline_tool_call_start", "tool" to "run_search_summary_pipeline", "query" to args["query"])
+        val connected = connect()
+        if (connected.isFailure) {
+            McpTrace.d("event" to "pipeline_tool_call_failure", "reason" to "connect_failed")
+            return PipelineToolResponse.Failure("Не удалось запустить pipeline сейчас. Попробуй позже.")
+        }
+
+        val result = callTool(
+            toolName = "run_search_summary_pipeline",
+            arguments = JSONObject(args)
+        ).getOrElse {
+            McpTrace.d("event" to "pipeline_tool_call_failure", "reason" to "tool_call_transport_error", "error" to (it.message ?: it::class.java.simpleName))
+            return PipelineToolResponse.Failure("Не удалось запустить pipeline сейчас. Попробуй позже.")
+        }
+
+        val textContent = manager.extractTextContent(result).orEmpty()
+        if (result.optBoolean("isError", false)) {
+            McpTrace.d("event" to "pipeline_tool_call_failure", "reason" to "tool_error", "message" to textContent)
+            return PipelineToolResponse.Failure("Не удалось запустить pipeline сейчас. Попробуй позже.")
+        }
+
+        val payload = result.optJSONObject("structuredContent")
+            ?: runCatching { JSONObject(textContent) }.getOrNull()
+        if (payload == null) {
+            McpTrace.d("event" to "pipeline_tool_call_failure", "reason" to "payload_unparseable")
+            return PipelineToolResponse.Failure("Не удалось запустить pipeline сейчас. Попробуй позже.")
+        }
+
+        if (!payload.optBoolean("ok", true)) {
+            val message = payload.optString("message", "Pipeline error")
+            McpTrace.d("event" to "pipeline_tool_call_failure", "reason" to "payload_error", "message" to message)
+            return PipelineToolResponse.Failure(message)
+        }
+
+        val normalizedQuery = payload.optString("query", query.trim())
+        val matchedCount = payload.optInt("matchedCount", 0)
+        val summary = payload.optString("summary", "")
+        val savedPath = payload.optString("savedPath", "").ifBlank { null }
+        val saved = payload.optBoolean("saved", false)
+        val noMatchesMessage = payload.optString("message", "").ifBlank { null }
+
+        if (matchedCount == 0) {
+            McpTrace.d("event" to "pipeline_tool_call_success", "matchedCount" to 0)
+            return PipelineToolResponse.NoMatches(
+                query = normalizedQuery,
+                message = noMatchesMessage ?: "Ничего не найдено по запросу $normalizedQuery."
+            )
+        }
+
+        val success = PipelineToolResponse.Success(
+            query = normalizedQuery,
+            matchedCount = matchedCount,
+            summary = summary,
+            savedPath = savedPath,
+            saved = saved
+        )
+        McpTrace.d(
+            "event" to "pipeline_tool_call_success",
+            "matchedCount" to success.matchedCount,
+            "saved" to success.saved,
+            "savedPath" to success.savedPath
+        )
+        return success
     }
 
     suspend fun disconnect() = manager.disconnect()
