@@ -43,8 +43,8 @@ class RequestClassifier @Inject constructor() {
         "плюс", "включая", "требования", "по шагам", "шаг"
     )
     private val quickQuestionMarkers = setOf(
-        "weather", "time", "capital", "definition", "what is", "who is", "when is",
-        "погода", "время", "столица", "что такое", "кто такой", "когда"
+        "time", "capital", "definition", "what is", "who is", "when is",
+        "время", "столица", "что такое", "кто такой", "когда"
     )
     private val developerDomainMarkers = setOf(
         "screen", "ui", "feature", "architecture", "flow", "state", "navigation", "search", "filters", "implementation",
