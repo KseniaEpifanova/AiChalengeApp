@@ -7,9 +7,16 @@ class McpRepositoryCurrencyTest {
 
     @Test
     fun `exchange tool payload contains normalized args`() {
+        val registry = McpServerRegistry(
+            configs = mapOf(
+                McpServerTarget.CURRENCY to McpServerConfig.remote("https://example.com/mcp"),
+                McpServerTarget.PIPELINE to McpServerConfig.remote("https://example.com/pipeline")
+            )
+        )
         val repository = McpRepository(
-            manager = McpClientManager(
-                serverConfig = McpServerConfig.remote("https://example.com/mcp")
+            manager = McpClientManager(registry),
+            multiServerRepository = McpMultiServerRepository(
+                manager = McpClientManager(registry)
             )
         )
 

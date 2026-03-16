@@ -22,10 +22,14 @@ android {
         val deepSeekApiKey = (project.findProperty("DEEPSEEK_API_KEY") as String?) ?: ""
         val deepSeekBaseUrl = (project.findProperty("DEEPSEEK_BASE_URL") as String?) ?: "https://api.deepseek.com/v1/"
         val mcpBaseUrl = (project.findProperty("MCP_BASE_URL") as String?) ?: "https://prompts.chat/api/mcp"
+        val mcpCurrencyBaseUrl = (project.findProperty("MCP_CURRENCY_BASE_URL") as String?) ?: mcpBaseUrl
+        val mcpPipelineBaseUrl = (project.findProperty("MCP_PIPELINE_BASE_URL") as String?) ?: mcpBaseUrl
 
         buildConfigField("String", "DEEPSEEK_API_KEY", "\"$deepSeekApiKey\"")
         buildConfigField("String", "DEEPSEEK_BASE_URL", "\"$deepSeekBaseUrl\"")
         buildConfigField("String", "MCP_BASE_URL", "\"$mcpBaseUrl\"")
+        buildConfigField("String", "MCP_CURRENCY_BASE_URL", "\"$mcpCurrencyBaseUrl\"")
+        buildConfigField("String", "MCP_PIPELINE_BASE_URL", "\"$mcpPipelineBaseUrl\"")
     }
 
     buildTypes {

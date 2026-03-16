@@ -36,6 +36,11 @@ import com.example.aichalengeapp.mcp.currency.CurrencyRequestParser
 import com.example.aichalengeapp.mcp.currency.CurrencyToolResponse
 import com.example.aichalengeapp.mcp.currency.CurrencyToolRouter
 import com.example.aichalengeapp.mcp.currency.McpCurrencyService
+import com.example.aichalengeapp.mcp.orchestration.CompositeRequestRouter
+import com.example.aichalengeapp.mcp.orchestration.McpOrchestrator
+import com.example.aichalengeapp.mcp.pipeline.McpPipelineService
+import com.example.aichalengeapp.mcp.pipeline.PipelineToolResponse
+import com.example.aichalengeapp.mcp.pipeline.PipelineToolRouter
 import com.example.aichalengeapp.repo.ChatRepository
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -194,6 +199,32 @@ class ChatAgentTest {
         assertTrue(reply.debugLabel == "mcp-currency")
     }
 
+    @Test
+    fun `combined request uses orchestrator path and skips llm`() = runSuspending {
+        val fixture = fixture("LLM fallback")
+        fixture.agent.init()
+
+        val reply = fixture.agent.handleUserMessage(
+            "Найди посты по слову qui, сделай краткую сводку и сохрани в файл, а потом скажи, сколько будет 100 EUR в USD",
+            StrategyConfig.SlidingWindow()
+        )
+
+        assertEquals("mcp-orchestrator", reply.debugLabel)
+        assertTrue(reply.text.contains("Также 100 EUR"))
+        assertTrue(fixture.repo.lastMessages.isEmpty())
+    }
+
+    @Test
+    fun `unrelated request still uses llm path`() = runSuspending {
+        val fixture = fixture("LLM fallback")
+        fixture.agent.init()
+
+        val reply = fixture.agent.handleUserMessage("Explain Kotlin sealed classes", StrategyConfig.SlidingWindow())
+
+        assertNull(reply.debugLabel)
+        assertTrue(fixture.repo.lastMessages.isNotEmpty())
+    }
+
     private fun runSuspending(block: suspend () -> Unit) = runBlocking {
         withTimeout(5_000) {
             block()
@@ -241,6 +272,65 @@ class ChatAgentTest {
             orchestrator = AgentOrchestrator(ProfileResolver(), RequestClassifier(), PromptAssembler()),
             taskConflictDetector = TaskConflictDetector(),
             taskIntentDetector = TaskIntentDetector(repo),
+            compositeRequestRouter = CompositeRequestRouter(PipelineToolRouter(), CurrencyToolRouter(CurrencyRequestParser())),
+            mcpOrchestrator = McpOrchestrator(
+                pipelineService = object : McpPipelineService {
+                    override suspend fun runSearchSummaryPipeline(query: String, filename: String?, limit: Int?): PipelineToolResponse {
+                        return PipelineToolResponse.Success(
+                            query = query,
+                            matchedCount = 2,
+                            summary = "Demo summary for $query",
+                            savedPath = "pipeline_output/latest_summary.txt",
+                            saved = true
+                        )
+                    }
+                },
+                currencyService = object : McpCurrencyService {
+                    override suspend fun getExchangeRate(base: String, target: String, amount: Double?): CurrencyToolResponse {
+                        return if (base.equals("EUR", ignoreCase = true) && target.equals("USD", ignoreCase = true)) {
+                            CurrencyToolResponse.Success(
+                                base = "EUR",
+                                target = "USD",
+                                amountRequested = amount ?: 1.0,
+                                convertedAmount = if (amount == null) 1.08 else amount * 1.08,
+                                rate = 1.08,
+                                date = "2026-03-10"
+                            )
+                        } else {
+                            CurrencyToolResponse.InvalidCurrency(base, target)
+                        }
+                    }
+
+                    override suspend fun getExchangeRateSummary(base: String, target: String): CurrencyToolResponse {
+                        return if (base.equals("EUR", ignoreCase = true) && target.equals("USD", ignoreCase = true)) {
+                            CurrencyToolResponse.Summary(
+                                base = "EUR",
+                                target = "USD",
+                                sampleCount = 3,
+                                latestRate = 1.0842,
+                                minRate = 1.0810,
+                                maxRate = 1.0861,
+                                averageRate = 1.0837,
+                                latestTimestamp = "2026-03-11T10:00:00.000Z"
+                            )
+                        } else {
+                            CurrencyToolResponse.Failure("No data for $base/$target")
+                        }
+                    }
+                }
+            ),
+            pipelineToolRouter = PipelineToolRouter(),
+            mcpPipelineService = object : McpPipelineService {
+                override suspend fun runSearchSummaryPipeline(query: String, filename: String?, limit: Int?): PipelineToolResponse {
+                    return PipelineToolResponse.Success(
+                        query = query,
+                        matchedCount = 2,
+                        summary = "Demo summary for $query",
+                        savedPath = "/tmp/pipeline_output/latest_summary.txt",
+                        saved = true
+                    )
+                }
+            },
             currencyToolRouter = CurrencyToolRouter(CurrencyRequestParser()),
             mcpCurrencyService = object : McpCurrencyService {
                 override suspend fun getExchangeRate(base: String, target: String, amount: Double?): CurrencyToolResponse {
