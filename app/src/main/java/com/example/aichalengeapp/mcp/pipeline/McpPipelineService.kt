@@ -1,6 +1,6 @@
 package com.example.aichalengeapp.mcp.pipeline
 
-import com.example.aichalengeapp.mcp.McpRepository
+import com.example.aichalengeapp.mcp.McpMultiServerRepository
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -14,7 +14,7 @@ interface McpPipelineService {
 
 @Singleton
 class McpPipelineServiceImpl @Inject constructor(
-    private val mcpRepository: McpRepository
+    private val mcpRepository: McpMultiServerRepository
 ) : McpPipelineService {
     override suspend fun runSearchSummaryPipeline(
         query: String,

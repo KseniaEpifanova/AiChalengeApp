@@ -17,7 +17,7 @@ import javax.inject.Singleton
 
 @Singleton
 class McpClientManager @Inject constructor(
-    private val serverConfig: McpServerConfig
+    private val serverRegistry: McpServerRegistry
 ) {
     private val mutex = Mutex()
     private val jsonMediaType = "application/json".toMediaType()
@@ -25,16 +25,17 @@ class McpClientManager @Inject constructor(
     private val idCounter = AtomicLong(1L)
     private val httpClient = OkHttpClient()
 
-    private var endpoint: String? = null
-    private var sessionId: String? = null
-    private var connected: Boolean = false
+    private val connections = mutableMapOf<McpServerTarget, ConnectionState>()
 
-    suspend fun connect(): Result<Unit> = runCatching {
+    suspend fun connect(): Result<Unit> = connect(serverRegistry.defaultTarget())
+
+    suspend fun connect(target: McpServerTarget): Result<Unit> = runCatching {
         mutex.withLock {
-            if (connected) return@withLock
+            val current = connections[target]
+            if (current?.connected == true) return@withLock
 
-            val remoteEndpoint = serverConfig.endpoint()
-            McpTrace.d("event" to "connect_start", "transport" to "streamable_http", "url" to remoteEndpoint)
+            val remoteEndpoint = serverRegistry.getConfig(target).endpoint()
+            McpTrace.d("event" to "connect_start", "server" to target.serverId, "transport" to "streamable_http", "url" to remoteEndpoint)
 
             val initializeId = idCounter.getAndIncrement()
             val initializePayload = JSONObject()
@@ -75,20 +76,25 @@ class McpClientManager @Inject constructor(
 
             postJson(remoteEndpoint, initializedPayload, newSessionId)
 
-            endpoint = remoteEndpoint
-            sessionId = newSessionId
-            connected = true
-            McpTrace.d("event" to "connect_success", "url" to remoteEndpoint, "hasSession" to (newSessionId != null))
+            connections[target] = ConnectionState(
+                endpoint = remoteEndpoint,
+                sessionId = newSessionId,
+                connected = true
+            )
+            McpTrace.d("event" to "connect_success", "server" to target.serverId, "url" to remoteEndpoint, "hasSession" to (newSessionId != null))
         }
     }.onFailure {
-        McpTrace.d("event" to "connect_failure", "error" to (it.message ?: it::class.java.simpleName), "baseUrl" to serverConfig.baseUrl)
-        disconnect()
+        McpTrace.d("event" to "connect_failure", "server" to target.serverId, "error" to (it.message ?: it::class.java.simpleName), "baseUrl" to serverRegistry.getConfig(target).baseUrl)
+        disconnect(target)
     }
 
-    suspend fun listTools(): Result<List<McpToolUiModel>> = runCatching {
+    suspend fun listTools(): Result<List<McpToolUiModel>> = listTools(serverRegistry.defaultTarget())
+
+    suspend fun listTools(target: McpServerTarget): Result<List<McpToolUiModel>> = runCatching {
         mutex.withLock {
-            val remoteEndpoint = endpoint ?: error("MCP is not connected. Call connect() first.")
-            McpTrace.d("event" to "tools_list_start", "url" to remoteEndpoint)
+            val connection = connections[target] ?: error("MCP is not connected. Call connect() first.")
+            val remoteEndpoint = connection.endpoint
+            McpTrace.d("event" to "tools_list_start", "server" to target.serverId, "url" to remoteEndpoint)
 
             val payload = JSONObject()
                 .put("jsonrpc", "2.0")
@@ -96,8 +102,8 @@ class McpClientManager @Inject constructor(
                 .put("method", "tools/list")
                 .put("params", JSONObject())
 
-            val response = postJson(remoteEndpoint, payload, sessionId)
-            McpTrace.d("event" to "tools_list_response", "contentType" to response.contentType)
+            val response = postJson(remoteEndpoint, payload, connection.sessionId)
+            McpTrace.d("event" to "tools_list_response", "server" to target.serverId, "contentType" to response.contentType)
             val json = parseProtocolJson(response.body)
             if (json.has("error")) {
                 error("MCP tools/list error: ${json.getJSONObject("error").optString("message", "unknown")}")
@@ -117,22 +123,29 @@ class McpClientManager @Inject constructor(
                     )
                 }
             }
-            McpTrace.d("event" to "tools_list_success", "count" to mapped.size)
+            McpTrace.d("event" to "tools_list_success", "server" to target.serverId, "count" to mapped.size)
             mapped
         }
     }.onFailure {
-        McpTrace.d("event" to "tools_list_failure", "error" to (it.message ?: it::class.java.simpleName))
+        McpTrace.d("event" to "tools_list_failure", "server" to target.serverId, "error" to (it.message ?: it::class.java.simpleName))
     }
 
     suspend fun callTool(
         toolName: String,
         arguments: JSONObject
+    ): Result<JSONObject> = callTool(serverRegistry.defaultTarget(), toolName, arguments)
+
+    suspend fun callTool(
+        target: McpServerTarget,
+        toolName: String,
+        arguments: JSONObject
     ): Result<JSONObject> = runCatching {
         mutex.withLock {
-            val remoteEndpoint = endpoint ?: error("MCP is not connected. Call connect() first.")
+            val connection = connections[target] ?: error("MCP is not connected. Call connect() first.")
+            val remoteEndpoint = connection.endpoint
             val normalizedTool = toolName.trim()
             if (normalizedTool.isEmpty()) error("Tool name is blank")
-            McpTrace.d("event" to "tool_call_start", "tool" to normalizedTool, "args" to arguments.toString())
+            McpTrace.d("event" to "tool_call_start", "server" to target.serverId, "tool" to normalizedTool, "args" to arguments.toString())
 
             val payload = JSONObject()
                 .put("jsonrpc", "2.0")
@@ -145,26 +158,33 @@ class McpClientManager @Inject constructor(
                         .put("arguments", arguments)
                 )
 
-            val response = postJson(remoteEndpoint, payload, sessionId)
+            val response = postJson(remoteEndpoint, payload, connection.sessionId)
             val json = parseProtocolJson(response.body)
             if (json.has("error")) {
                 error("MCP tools/call error: ${json.getJSONObject("error").optString("message", "unknown")}")
             }
 
             val result = json.optJSONObject("result") ?: JSONObject()
-            McpTrace.d("event" to "tool_call_success", "tool" to normalizedTool, "hasResult" to (result.length() > 0))
+            McpTrace.d("event" to "tool_call_success", "server" to target.serverId, "tool" to normalizedTool, "hasResult" to (result.length() > 0))
             result
         }
     }.onFailure {
-        McpTrace.d("event" to "tool_call_failure", "tool" to toolName, "error" to (it.message ?: it::class.java.simpleName))
+        McpTrace.d("event" to "tool_call_failure", "server" to target.serverId, "tool" to toolName, "error" to (it.message ?: it::class.java.simpleName))
     }
 
-    suspend fun disconnect() {
+    suspend fun disconnect() = disconnect(serverRegistry.defaultTarget())
+
+    suspend fun disconnect(target: McpServerTarget) {
         mutex.withLock {
-            endpoint = null
-            sessionId = null
-            connected = false
-            McpTrace.d("event" to "disconnect")
+            connections.remove(target)
+            McpTrace.d("event" to "disconnect", "server" to target.serverId)
+        }
+    }
+
+    suspend fun disconnectAll() {
+        mutex.withLock {
+            connections.clear()
+            McpTrace.d("event" to "disconnect_all")
         }
     }
 
@@ -261,5 +281,11 @@ class McpClientManager @Inject constructor(
         val body: String,
         val sessionId: String?,
         val contentType: String?
+    )
+
+    private data class ConnectionState(
+        val endpoint: String,
+        val sessionId: String?,
+        val connected: Boolean
     )
 }

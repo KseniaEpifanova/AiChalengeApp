@@ -16,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.aichalengeapp.mcp.McpConnectionState
+import com.example.aichalengeapp.mcp.McpServerTarget
 import com.example.aichalengeapp.vm.McpUiState
 
 @Composable
@@ -33,6 +34,12 @@ fun McpDebugScreen(
     ) {
         Text("MCP Debug", style = MaterialTheme.typography.headlineSmall)
         Text("Status: ${state.connectionState.name}", style = MaterialTheme.typography.bodyMedium)
+        state.serverUrls.forEach { (target, url) ->
+            Text(
+                text = "${targetLabel(target)}: $url",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
 
         state.error?.let {
             Text(
@@ -71,5 +78,12 @@ fun McpDebugScreen(
                 }
             }
         }
+    }
+}
+
+private fun targetLabel(target: McpServerTarget): String {
+    return when (target) {
+        McpServerTarget.CURRENCY -> "Currency server"
+        McpServerTarget.PIPELINE -> "Pipeline server"
     }
 }

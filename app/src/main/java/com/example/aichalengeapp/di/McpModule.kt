@@ -1,7 +1,9 @@
 package com.example.aichalengeapp.di
 
 import com.example.aichalengeapp.BuildConfig
+import com.example.aichalengeapp.mcp.McpServerRegistry
 import com.example.aichalengeapp.mcp.McpServerConfig
+import com.example.aichalengeapp.mcp.McpServerTarget
 import com.example.aichalengeapp.mcp.currency.FrankfurterApi
 import com.example.aichalengeapp.mcp.currency.FrankfurterHttpApi
 import com.example.aichalengeapp.mcp.currency.McpCurrencyService
@@ -20,7 +22,14 @@ object McpModule {
 
     @Provides
     @Singleton
-    fun provideMcpServerConfig(): McpServerConfig = McpServerConfig.remote(BuildConfig.MCP_BASE_URL)
+    fun provideMcpServerRegistry(): McpServerRegistry {
+        return McpServerRegistry(
+            configs = mapOf(
+                McpServerTarget.CURRENCY to McpServerConfig.remote(BuildConfig.MCP_CURRENCY_BASE_URL),
+                McpServerTarget.PIPELINE to McpServerConfig.remote(BuildConfig.MCP_PIPELINE_BASE_URL)
+            )
+        )
+    }
 
     @Provides
     @Singleton
