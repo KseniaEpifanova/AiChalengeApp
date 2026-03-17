@@ -38,6 +38,9 @@ import com.example.aichalengeapp.mcp.orchestration.McpOrchestratorResult
 import com.example.aichalengeapp.mcp.pipeline.McpPipelineService
 import com.example.aichalengeapp.mcp.pipeline.PipelineToolResponse
 import com.example.aichalengeapp.mcp.pipeline.PipelineToolRouter
+import com.example.aichalengeapp.retrieval.DocumentRetriever
+import com.example.aichalengeapp.retrieval.KnowledgeRouter
+import com.example.aichalengeapp.retrieval.RetrievalPromptBuilder
 import com.example.aichalengeapp.repo.ChatRepository
 import android.util.Log
 import dagger.hilt.android.scopes.ViewModelScoped
@@ -69,7 +72,10 @@ class ChatAgent @Inject constructor(
     private val pipelineToolRouter: PipelineToolRouter,
     private val mcpPipelineService: McpPipelineService,
     private val currencyToolRouter: CurrencyToolRouter,
-    private val mcpCurrencyService: McpCurrencyService
+    private val mcpCurrencyService: McpCurrencyService,
+    private val knowledgeRouter: KnowledgeRouter,
+    private val documentRetriever: DocumentRetriever,
+    private val retrievalPromptBuilder: RetrievalPromptBuilder
 ) {
     private companion object {
         private const val TAG = "TaskClassifier"
@@ -610,6 +616,25 @@ class ChatAgent @Inject constructor(
 
         val strategy = selector.select(strategyConfig)
         val plan = strategy.build(shortTerm, strategyConfig)
+        val retrievalContext = if (forcedIntent == null && transitionSource == "chat" && knowledgeRouter.shouldRetrieve(trimmed)) {
+            runCatching {
+                val retrievedChunks = documentRetriever.retrieve(trimmed)
+                if (retrievedChunks.isNotEmpty()) {
+                    retrievalPromptBuilder.build(trimmed, retrievedChunks)
+                } else {
+                    null
+                }
+            }.getOrElse { error ->
+                com.example.aichalengeapp.mcp.McpTrace.d(
+                    "event" to "retrieval_fallback_to_llm",
+                    "message" to trimmed,
+                    "error" to (error.message ?: error::class.java.simpleName)
+                )
+                null
+            }
+        } else {
+            null
+        }
 
         val persistedTaskState = taskManager.getTaskState()
         val responseTaskState = persistedTaskState ?: taskState
@@ -658,6 +683,9 @@ class ChatAgent @Inject constructor(
 
         val llmMessages = buildList {
             add(AgentMessage(AgentRole.SYSTEM, systemPrompt))
+            if (!retrievalContext.isNullOrBlank()) {
+                add(AgentMessage(AgentRole.SYSTEM, retrievalContext))
+            }
             if (stageChangedNotice != null) {
                 add(AgentMessage(AgentRole.SYSTEM, stageChangedNotice))
             }
@@ -673,6 +701,13 @@ class ChatAgent @Inject constructor(
                 "notice" to stageChangedNotice
             )
         }
+
+        com.example.aichalengeapp.mcp.McpTrace.d(
+            "event" to "final_llm_request_messages",
+            "count" to llmMessages.size,
+            "roles" to llmMessages.joinToString(separator = ",") { it.role.name },
+            "lastUser" to llmMessages.lastOrNull { it.role == AgentRole.USER }?.content
+        )
 
         val estimatedPrompt = tokenEstimator.estimateTokens(llmMessages)
         val estimatedUser = tokenEstimator.estimateTokens(trimmed)

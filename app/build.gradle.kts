@@ -7,6 +7,9 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+fun String.asBuildConfigString(): String =
+    "\"" + replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
 android {
     namespace = "com.example.aichalengeapp"
     compileSdk = 36
@@ -25,11 +28,11 @@ android {
         val mcpCurrencyBaseUrl = (project.findProperty("MCP_CURRENCY_BASE_URL") as String?) ?: mcpBaseUrl
         val mcpPipelineBaseUrl = (project.findProperty("MCP_PIPELINE_BASE_URL") as String?) ?: mcpBaseUrl
 
-        buildConfigField("String", "DEEPSEEK_API_KEY", "\"$deepSeekApiKey\"")
-        buildConfigField("String", "DEEPSEEK_BASE_URL", "\"$deepSeekBaseUrl\"")
-        buildConfigField("String", "MCP_BASE_URL", "\"$mcpBaseUrl\"")
-        buildConfigField("String", "MCP_CURRENCY_BASE_URL", "\"$mcpCurrencyBaseUrl\"")
-        buildConfigField("String", "MCP_PIPELINE_BASE_URL", "\"$mcpPipelineBaseUrl\"")
+        buildConfigField("String", "DEEPSEEK_API_KEY", deepSeekApiKey.asBuildConfigString())
+        buildConfigField("String", "DEEPSEEK_BASE_URL", deepSeekBaseUrl.asBuildConfigString())
+        buildConfigField("String", "MCP_BASE_URL", mcpBaseUrl.asBuildConfigString())
+        buildConfigField("String", "MCP_CURRENCY_BASE_URL", mcpCurrencyBaseUrl.asBuildConfigString())
+        buildConfigField("String", "MCP_PIPELINE_BASE_URL", mcpPipelineBaseUrl.asBuildConfigString())
     }
 
     buildTypes {

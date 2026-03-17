@@ -58,7 +58,7 @@ object NetworkModule {
     @Singleton
     fun provideRetrofit(moshi: Moshi, okHttp: OkHttpClient): Retrofit =
         Retrofit.Builder()
-            .baseUrl("https://api.deepseek.com/")
+            .baseUrl(normalizeDeepSeekBaseUrl(BuildConfig.DEEPSEEK_BASE_URL))
             .client(okHttp)
             .addConverterFactory(MoshiConverterFactory.create(moshi))
             .build()
@@ -67,4 +67,24 @@ object NetworkModule {
     @Singleton
     fun provideDeepSeekApi(retrofit: Retrofit): ChatApi =
         retrofit.create(ChatApi::class.java)
+
+    private fun normalizeDeepSeekBaseUrl(baseUrl: String): String {
+        val normalized = baseUrl
+            .trim()
+            .removeSurrounding("\"")
+            .removeSurrounding("'")
+            .removeSuffix("/")
+        require(normalized.isNotBlank()) {
+            "DEEPSEEK_BASE_URL is blank. Set a DeepSeek base URL in gradle.properties."
+        }
+        require(normalized.startsWith("http://") || normalized.startsWith("https://")) {
+            "DEEPSEEK_BASE_URL must start with http:// or https://"
+        }
+
+        return if (normalized.endsWith("/v1")) {
+            "$normalized/"
+        } else {
+            "$normalized/v1/"
+        }
+    }
 }
