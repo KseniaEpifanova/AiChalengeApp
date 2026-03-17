@@ -24,3 +24,16 @@ data class DsChatResponse(
         val total_tokens: Int
     )
 }
+
+data class DsEmbeddingRequest(
+    val model: String = "deepseek-embedding",
+    val input: String
+)
+
+data class DsEmbeddingResponse(
+    val data: List<Item>
+) {
+    data class Item(
+        val embedding: List<Float>
+    )
+}

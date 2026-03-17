@@ -41,6 +41,10 @@ import com.example.aichalengeapp.mcp.orchestration.McpOrchestrator
 import com.example.aichalengeapp.mcp.pipeline.McpPipelineService
 import com.example.aichalengeapp.mcp.pipeline.PipelineToolResponse
 import com.example.aichalengeapp.mcp.pipeline.PipelineToolRouter
+import com.example.aichalengeapp.retrieval.DocumentRetriever
+import com.example.aichalengeapp.retrieval.KnowledgeRouter
+import com.example.aichalengeapp.retrieval.RetrievalPromptBuilder
+import com.example.aichalengeapp.retrieval.RetrievedChunk
 import com.example.aichalengeapp.repo.ChatRepository
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -225,6 +229,36 @@ class ChatAgentTest {
         assertTrue(fixture.repo.lastMessages.isNotEmpty())
     }
 
+    @Test
+    fun `knowledge request injects retrieved context into llm prompt`() = runSuspending {
+        val fixture = fixture("LLM fallback")
+        fixture.agent.init()
+
+        fixture.agent.handleUserMessage("How does MCP connection work in this project?", StrategyConfig.SlidingWindow())
+
+        val systemMessages = fixture.repo.lastMessages.filter { it.role == com.example.aichalengeapp.data.AgentRole.SYSTEM }
+        assertTrue(systemMessages.any { it.content.contains("RETRIEVED PROJECT KNOWLEDGE") })
+        assertTrue(systemMessages.any { it.content.contains("McpClientManager handles initialize") })
+    }
+
+    @Test
+    fun `knowledge retrieval failure falls back to llm for same message`() = runSuspending {
+        val fixture = fixture(
+            llmText = "Fallback LLM answer",
+            documentRetriever = object : DocumentRetriever {
+                override suspend fun retrieve(query: String, topK: Int): List<RetrievedChunk> {
+                    error("HTTP 404")
+                }
+            }
+        )
+        fixture.agent.init()
+
+        val reply = fixture.agent.handleUserMessage("Как работает MCP подключение в проекте?", StrategyConfig.SlidingWindow())
+
+        assertEquals("Fallback LLM answer", reply.text)
+        assertTrue(fixture.repo.lastMessages.any { it.role == com.example.aichalengeapp.data.AgentRole.USER && it.content.contains("Как работает MCP подключение в проекте?") })
+    }
+
     private fun runSuspending(block: suspend () -> Unit) = runBlocking {
         withTimeout(5_000) {
             block()
@@ -233,7 +267,8 @@ class ChatAgentTest {
 
     private fun fixture(
         llmText: String,
-        classifierMap: Map<String, String> = emptyMap()
+        classifierMap: Map<String, String> = emptyMap(),
+        documentRetriever: DocumentRetriever? = null
     ): Fixture {
         val repo = FakeRepo(llmText, classifierMap)
         val shortTermStore = FakeAgentMemoryStore()
@@ -364,7 +399,28 @@ class ChatAgentTest {
                         CurrencyToolResponse.Failure("No data for $base/$target")
                     }
                 }
-            }
+            },
+            knowledgeRouter = KnowledgeRouter(),
+            documentRetriever = documentRetriever ?: object : DocumentRetriever {
+                override suspend fun retrieve(query: String, topK: Int): List<RetrievedChunk> {
+                    return if (query.contains("MCP connection", ignoreCase = true) || query.contains("MCP подключение", ignoreCase = true)) {
+                        listOf(
+                            RetrievedChunk(
+                                source = "android-app",
+                                titleOrFile = "McpClientManager.kt",
+                                section = "connect",
+                                chunkId = "mcp-connect-1",
+                                strategy = "semantic",
+                                text = "McpClientManager handles initialize, session tracking, tools/list and tools/call over HTTP MCP.",
+                                similarity = 0.91
+                            )
+                        )
+                    } else {
+                        emptyList()
+                    }
+                }
+            },
+            retrievalPromptBuilder = RetrievalPromptBuilder()
         )
 
         return Fixture(agent, repo)

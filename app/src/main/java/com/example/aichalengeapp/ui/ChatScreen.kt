@@ -41,6 +41,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -85,6 +88,8 @@ fun ChatScreen(
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    val inputFocusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
 
     BackHandler(enabled = destination != MainDestination.CHAT || drawerState.isOpen) {
         if (drawerState.isOpen) {
@@ -318,16 +323,30 @@ fun ChatScreen(
                             }
                         }
 
-                        LazyColumn(
-                            state = listState,
-                            modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(12.dp)
-                        ) {
-                            items(messages, key = { it.id }) { msg ->
-                                MessageBubble(
-                                    message = msg,
-                                    onToggleExpand = viewModel::toggleExpand
-                                )
+                        if (messages.isEmpty()) {
+                            WelcomeView(
+                                onStartChat = {
+                                    focusManager.clearFocus(force = true)
+                                    inputFocusRequester.requestFocus()
+                                },
+                                onPromptSelected = { prompt ->
+                                    viewModel.send(prompt)
+                                    input = ""
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                        } else {
+                            LazyColumn(
+                                state = listState,
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(12.dp)
+                            ) {
+                                items(messages, key = { it.id }) { msg ->
+                                    MessageBubble(
+                                        message = msg,
+                                        onToggleExpand = viewModel::toggleExpand
+                                    )
+                                }
                             }
                         }
 
@@ -340,7 +359,9 @@ fun ChatScreen(
                             TextField(
                                 value = input,
                                 onValueChange = { input = it },
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .focusRequester(inputFocusRequester),
                                 placeholder = { Text("Type a message...") },
                                 enabled = !isLoading
                             )
