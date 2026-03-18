@@ -69,6 +69,7 @@ fun ChatScreen(
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val strategy by viewModel.strategy.collectAsStateWithLifecycle()
+    val ragEnabled by viewModel.ragEnabled.collectAsStateWithLifecycle()
     val profile by viewModel.profile.collectAsStateWithLifecycle()
     val planningDraft by viewModel.planningDraft.collectAsStateWithLifecycle()
     val profileDirty by viewModel.profileDirty.collectAsStateWithLifecycle()
@@ -229,8 +230,10 @@ fun ChatScreen(
                 MainDestination.SETTINGS -> {
                     SettingsScreen(
                         currentStrategy = strategy.type,
+                        ragEnabled = ragEnabled,
                         isLoading = isLoading,
                         onSelectStrategy = viewModel::setStrategyType,
+                        onRagEnabledChange = viewModel::setRagEnabled,
                         taskState = taskState,
                         onNextStep = viewModel::nextTaskStep,
                         onPause = viewModel::pauseTask,
