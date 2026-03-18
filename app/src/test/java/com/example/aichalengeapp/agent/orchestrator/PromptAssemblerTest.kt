@@ -2,6 +2,8 @@ package com.example.aichalengeapp.agent.orchestrator
 
 import com.example.aichalengeapp.agent.guard.InvariantsProfile
 import com.example.aichalengeapp.agent.profile.AssistantProfile
+import com.example.aichalengeapp.agent.profile.PlanningProfile
+import com.example.aichalengeapp.agent.profile.ResponseProfile
 import com.example.aichalengeapp.agent.task.TaskStage
 import com.example.aichalengeapp.agent.task.TaskState
 import org.junit.Assert.assertFalse
@@ -25,6 +27,7 @@ class PromptAssemblerTest {
 
         assertTrue(prompt.contains("RESPONSE PROFILE"))
         assertTrue(prompt.contains("PLANNING PROFILE"))
+        assertTrue(prompt.contains("RESPONSE RULES (HIGHEST PRIORITY)"))
     }
 
     @Test
@@ -70,5 +73,29 @@ class PromptAssemblerTest {
         assertTrue(prompt.contains("Allowed behavior in VALIDATION"))
         assertTrue(prompt.contains("Forbidden behavior in VALIDATION"))
         assertTrue(prompt.contains("do not continue implementation"))
+    }
+
+    @Test
+    fun `short-answer profile adds hard brevity rules`() {
+        val prompt = assembler.assemble(
+            basePrompt = "Base",
+            profile = AssistantProfile(
+                id = "short",
+                name = "Short",
+                responseProfile = ResponseProfile(
+                    style = "Friendly",
+                    format = "Short and structured",
+                    constraints = "Short answers only"
+                ),
+                planningProfile = PlanningProfile()
+            ),
+            invariants = InvariantsProfile(),
+            taskState = null,
+            longTermJson = "{}",
+            workingJson = "{}"
+        )
+
+        assertTrue(prompt.contains("maximum 3 to 5 sentences"))
+        assertTrue(prompt.contains("If your draft is longer than 5 sentences, rewrite it shorter"))
     }
 }

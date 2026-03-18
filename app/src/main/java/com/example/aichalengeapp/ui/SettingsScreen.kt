@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -26,8 +27,10 @@ import com.example.aichalengeapp.vm.ChatViewModel
 @Composable
 fun SettingsScreen(
     currentStrategy: ChatViewModel.StrategyTypeUi,
+    ragEnabled: Boolean,
     isLoading: Boolean,
     onSelectStrategy: (ChatViewModel.StrategyTypeUi) -> Unit,
+    onRagEnabledChange: (Boolean) -> Unit,
     taskState: TaskState?,
     onNextStep: () -> Unit,
     onPause: () -> Unit,
@@ -66,6 +69,26 @@ fun SettingsScreen(
             ) { Text("Branching") }
         }
         Text("Current strategy: $currentStrategy", style = MaterialTheme.typography.bodySmall)
+
+        Spacer(Modifier.height(8.dp))
+        Text("Retrieval Mode", style = MaterialTheme.typography.titleMedium)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("RAG", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    text = if (ragEnabled) "Enabled: retrieve chunks before LLM" else "Disabled: direct LLM only",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            Switch(
+                checked = ragEnabled,
+                onCheckedChange = onRagEnabledChange,
+                enabled = !isLoading
+            )
+        }
 
         Spacer(Modifier.height(8.dp))
         Text("Task Lifecycle", style = MaterialTheme.typography.titleMedium)

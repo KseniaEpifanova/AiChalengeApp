@@ -77,6 +77,9 @@ class ChatViewModel @Inject constructor(
     private val _strategy = MutableStateFlow(StrategyUiState())
     val strategy: StateFlow<StrategyUiState> = _strategy.asStateFlow()
 
+    private val _ragEnabled = MutableStateFlow(true)
+    val ragEnabled: StateFlow<Boolean> = _ragEnabled.asStateFlow()
+
     private val _factsJson = MutableStateFlow("")
     val factsJson: StateFlow<String> = _factsJson.asStateFlow()
 
@@ -321,6 +324,10 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    fun setRagEnabled(enabled: Boolean) {
+        _ragEnabled.value = enabled
+    }
+
     fun send(text: String) {
         val trimmed = text.trim()
         if (trimmed.isEmpty() || _isLoading.value) return
@@ -484,10 +491,11 @@ class ChatViewModel @Inject constructor(
             if (_strategy.value.type == StrategyTypeUi.BRANCHING) ensureDefaultBranch()
 
             val cfg = _strategy.value.toConfig()
+            val ragEnabled = _ragEnabled.value
             val reply = if (useBootstrapForTask) {
                 agentIo { handleTaskBootstrapMessage(trimmed, cfg) }
             } else {
-                agentIo { handleUserMessage(trimmed, cfg) }
+                agentIo { handleUserMessage(trimmed, cfg, ragEnabled = ragEnabled) }
             }
 
             removeMessageById(typingId)
@@ -532,6 +540,7 @@ class ChatViewModel @Inject constructor(
             agentIo { resetAll() }
             _messages.value = emptyList()
             _strategy.value = StrategyUiState()
+            _ragEnabled.value = true
             _factsJson.value = ""
             _workingJson.value = ""
             _longTermJson.value = ""
