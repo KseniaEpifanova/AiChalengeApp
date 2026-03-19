@@ -16,18 +16,19 @@ class PromptAssemblerTest {
 
     @Test
     fun `includes profile configuration`() {
-        val prompt = assembler.assemble(
+        val contextPrompt = assembler.buildContextPrompt(
             basePrompt = "Base",
-            profile = AssistantProfile.default(),
+            planningProfile = AssistantProfile.default().planningProfile,
             invariants = InvariantsProfile(),
             taskState = null,
             longTermJson = "{}",
             workingJson = "{}"
         )
+        val profilePrompt = assembler.buildProfilePrompt(AssistantProfile.default())
 
-        assertTrue(prompt.contains("RESPONSE PROFILE"))
-        assertTrue(prompt.contains("PLANNING PROFILE"))
-        assertTrue(prompt.contains("RESPONSE RULES (HIGHEST PRIORITY)"))
+        assertTrue(contextPrompt.contains("PLANNING PROFILE"))
+        assertTrue(profilePrompt.contains("RESPONSE PROFILE (HIGHEST PRIORITY)"))
+        assertTrue(profilePrompt.contains("Style requirement"))
     }
 
     @Test
@@ -35,8 +36,8 @@ class PromptAssemblerTest {
         val profile = AssistantProfile.default()
         val invariants = InvariantsProfile("Compose only", "No paid APIs")
 
-        val withGuard = assembler.assemble("Base", profile, invariants, null, "{}", "{}")
-        val withoutGuard = assembler.assemble("Base", profile, InvariantsProfile(), null, "{}", "{}")
+        val withGuard = assembler.buildContextPrompt("Base", profile.planningProfile, invariants, null, "{}", "{}")
+        val withoutGuard = assembler.buildContextPrompt("Base", profile.planningProfile, InvariantsProfile(), null, "{}", "{}")
 
         assertTrue(withGuard.contains("INVARIANT GUARD"))
         assertFalse(withoutGuard.contains("INVARIANT GUARD"))
@@ -44,9 +45,9 @@ class PromptAssemblerTest {
 
     @Test
     fun `includes task state when provided`() {
-        val prompt = assembler.assemble(
+        val prompt = assembler.buildContextPrompt(
             basePrompt = "Base",
-            profile = AssistantProfile.default(),
+            planningProfile = AssistantProfile.default().planningProfile,
             invariants = InvariantsProfile(),
             taskState = TaskState(goal = "G", stage = TaskStage.EXECUTION),
             longTermJson = "{}",
@@ -59,9 +60,9 @@ class PromptAssemblerTest {
 
     @Test
     fun `uses validation response contract when stage is validation`() {
-        val prompt = assembler.assemble(
+        val prompt = assembler.buildContextPrompt(
             basePrompt = "Base",
-            profile = AssistantProfile.default(),
+            planningProfile = AssistantProfile.default().planningProfile,
             invariants = InvariantsProfile(),
             taskState = TaskState(goal = "G", stage = TaskStage.VALIDATION),
             longTermJson = "{}",
@@ -76,10 +77,9 @@ class PromptAssemblerTest {
     }
 
     @Test
-    fun `short-answer profile adds hard brevity rules`() {
-        val prompt = assembler.assemble(
-            basePrompt = "Base",
-            profile = AssistantProfile(
+    fun `short-answer profile adds strict prompt-only brevity rules`() {
+        val prompt = assembler.buildProfilePrompt(
+            AssistantProfile(
                 id = "short",
                 name = "Short",
                 responseProfile = ResponseProfile(
@@ -88,14 +88,26 @@ class PromptAssemblerTest {
                     constraints = "Short answers only"
                 ),
                 planningProfile = PlanningProfile()
-            ),
-            invariants = InvariantsProfile(),
-            taskState = null,
-            longTermJson = "{}",
-            workingJson = "{}"
+            )
         )
 
-        assertTrue(prompt.contains("maximum 3 to 5 sentences"))
-        assertTrue(prompt.contains("If your draft is longer than 5 sentences, rewrite it shorter"))
+        assertTrue(prompt.contains("You MUST answer briefly"))
+        assertTrue(prompt.contains("Maximum length: 3 to 5 sentences"))
+        assertFalse(prompt.contains("rewrite it shorter"))
+    }
+
+    @Test
+    fun `empty profile does not inject default formatting`() {
+        val prompt = assembler.buildProfilePrompt(
+            AssistantProfile(
+                id = "blank",
+                name = "Blank",
+                responseProfile = ResponseProfile(),
+                planningProfile = PlanningProfile()
+            )
+        )
+
+        assertFalse(prompt.contains("Short and structured"))
+        assertFalse(prompt.contains("Friendly, supportive, calm"))
     }
 }

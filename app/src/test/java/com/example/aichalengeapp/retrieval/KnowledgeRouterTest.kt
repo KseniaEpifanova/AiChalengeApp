@@ -18,6 +18,21 @@ class KnowledgeRouterTest {
     }
 
     @Test
+    fun `matches code entity question for orchestrator`() {
+        assertTrue(router.shouldRetrieve("Где реализован orchestrator?"))
+    }
+
+    @Test
+    fun `matches document retriever question`() {
+        assertTrue(router.shouldRetrieve("Где находится DocumentRetriever?"))
+    }
+
+    @Test
+    fun `matches cosine similarity question`() {
+        assertTrue(router.shouldRetrieve("Как считается cosine similarity?"))
+    }
+
+    @Test
     fun `does not match currency request`() {
         assertFalse(router.shouldRetrieve("Сколько будет 100 EUR в USD?"))
     }

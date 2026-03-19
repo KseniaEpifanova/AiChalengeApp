@@ -2,15 +2,16 @@ package com.example.aichalengeapp.agent.orchestrator
 
 import com.example.aichalengeapp.agent.guard.InvariantsProfile
 import com.example.aichalengeapp.agent.profile.AssistantProfile
+import com.example.aichalengeapp.agent.profile.ResponseProfile
 import com.example.aichalengeapp.agent.task.TaskStage
 import com.example.aichalengeapp.agent.task.TaskState
 import javax.inject.Inject
 
 class PromptAssembler @Inject constructor() {
 
-    fun assemble(
+    fun buildContextPrompt(
         basePrompt: String,
-        profile: AssistantProfile,
+        planningProfile: com.example.aichalengeapp.agent.profile.PlanningProfile,
         invariants: InvariantsProfile,
         taskState: TaskState?,
         longTermJson: String,
@@ -18,32 +19,7 @@ class PromptAssembler @Inject constructor() {
     ): String {
         val lt = longTermJson.ifBlank { "{}" }
         val wk = workingJson.ifBlank { "{}" }
-        val response = profile.responseProfile
-        val planning = profile.planningProfile
-        val style = response.style.ifBlank { "Friendly, supportive, calm" }
-        val format = response.format.ifBlank { "Short and structured. Use bullets when helpful." }
-        val constraints = response.constraints.ifBlank { "No special constraints." }
-
         val guardActive = !invariants.isEmpty()
-        val shortAnswerRequired = requiresShortAnswer(response)
-
-        val responseContract = buildString {
-            appendLine("RESPONSE RULES (HIGHEST PRIORITY)")
-            appendLine("You MUST follow these rules in every answer.")
-            appendLine("- Style requirement: $style")
-            appendLine("- Format requirement: $format")
-            appendLine("- Constraint requirement: $constraints")
-            if (shortAnswerRequired) {
-                appendLine("- Keep the answer brief: maximum 3 to 5 sentences.")
-                appendLine("- Prefer short bullet points when possible.")
-                appendLine("- Do NOT write long explanations.")
-                appendLine("- Do NOT add extra context unless the user asks for it.")
-                appendLine("- If your draft is longer than 5 sentences, rewrite it shorter before responding.")
-            } else {
-                appendLine("- Stay consistent with the requested style and format.")
-                appendLine("- Avoid unnecessary filler and repetition.")
-            }
-        }.trimIndent()
 
         val guardBlock = if (guardActive) {
             """
@@ -99,21 +75,14 @@ class PromptAssembler @Inject constructor() {
         }
 
         return """
-            $responseContract
-
             $basePrompt
 
-            RESPONSE PROFILE:
-            style=$style
-            format=$format
-            constraints=$constraints
-
             PLANNING PROFILE:
-            autoDetectComplexity=${planning.autoDetectComplexity}
-            complexitySensitivity=${planning.complexitySensitivity}
-            requirePlanApproval=${planning.requirePlanApproval}
-            allowAutoContinueExecution=${planning.allowAutoContinueExecution}
-            requireValidationBeforeDone=${planning.requireValidationBeforeDone}
+            autoDetectComplexity=${planningProfile.autoDetectComplexity}
+            complexitySensitivity=${planningProfile.complexitySensitivity}
+            requirePlanApproval=${planningProfile.requirePlanApproval}
+            allowAutoContinueExecution=${planningProfile.allowAutoContinueExecution}
+            requireValidationBeforeDone=${planningProfile.requireValidationBeforeDone}
 
             $guardBlock
 
@@ -125,7 +94,47 @@ class PromptAssembler @Inject constructor() {
         """.trimIndent()
     }
 
-    private fun requiresShortAnswer(responseProfile: com.example.aichalengeapp.agent.profile.ResponseProfile): Boolean {
+    fun buildProfilePrompt(profile: AssistantProfile): String {
+        val response = profile.responseProfile
+        val style = response.style.trim()
+        val format = response.format.trim()
+        val constraints = response.constraints.trim()
+
+        val rules = buildList {
+            if (style.isNotBlank()) add("Style requirement: $style")
+            if (format.isNotBlank()) add("Format requirement: $format")
+            if (constraints.isNotBlank()) add("Constraint requirement: $constraints")
+
+            when {
+                requiresShortAnswer(response) -> {
+                    add("You MUST answer briefly.")
+                    add("Maximum length: 3 to 5 sentences unless the user explicitly asks for more detail.")
+                    add("Prefer a compact structure such as short bullets or a short paragraph.")
+                    add("Do NOT add extra explanation, examples, or background unless the user asks.")
+                }
+                requiresLongAnswer(response) -> {
+                    add("You MUST provide a detailed answer.")
+                    add("Use multiple paragraphs or structured bullets when useful.")
+                    add("Include enough explanation to make the reasoning easy to follow.")
+                }
+            }
+        }
+
+        return if (rules.isEmpty()) {
+            """
+            RESPONSE PROFILE (HIGHEST PRIORITY)
+            No explicit response style, format, or constraint rules are set for this profile.
+            """.trimIndent()
+        } else {
+            buildString {
+                appendLine("RESPONSE PROFILE (HIGHEST PRIORITY)")
+                appendLine("You MUST follow these profile rules in every answer.")
+                rules.forEach { rule -> appendLine("- $rule") }
+            }.trimIndent()
+        }
+    }
+
+    private fun requiresShortAnswer(responseProfile: ResponseProfile): Boolean {
         val combined = listOf(
             responseProfile.style,
             responseProfile.format,
@@ -139,5 +148,19 @@ class PromptAssembler @Inject constructor() {
             combined.contains("корот") ||
             combined.contains("кратк") ||
             combined.contains("сжато")
+    }
+
+    private fun requiresLongAnswer(responseProfile: ResponseProfile): Boolean {
+        val combined = listOf(
+            responseProfile.style,
+            responseProfile.format,
+            responseProfile.constraints
+        ).joinToString(" ").lowercase()
+
+        return combined.contains("long") ||
+            combined.contains("detailed") ||
+            combined.contains("thorough") ||
+            combined.contains("подроб") ||
+            combined.contains("деталь")
     }
 }

@@ -7,9 +7,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -22,15 +26,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.aichalengeapp.agent.task.TaskStage
 import com.example.aichalengeapp.agent.task.TaskState
+import com.example.aichalengeapp.retrieval.RetrievalMode
 import com.example.aichalengeapp.vm.ChatViewModel
 
 @Composable
 fun SettingsScreen(
     currentStrategy: ChatViewModel.StrategyTypeUi,
     ragEnabled: Boolean,
+    retrievalMode: RetrievalMode,
     isLoading: Boolean,
     onSelectStrategy: (ChatViewModel.StrategyTypeUi) -> Unit,
     onRagEnabledChange: (Boolean) -> Unit,
+    onRetrievalModeChange: (RetrievalMode) -> Unit,
     taskState: TaskState?,
     onNextStep: () -> Unit,
     onPause: () -> Unit,
@@ -89,6 +96,33 @@ fun SettingsScreen(
                 enabled = !isLoading
             )
         }
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                RetrievalModeOption(
+                    label = "BASELINE",
+                    selected = retrievalMode == RetrievalMode.BASELINE,
+                    enabled = !isLoading,
+                    onClick = { onRetrievalModeChange(RetrievalMode.BASELINE) },
+                    modifier = Modifier.weight(1f)
+                )
+                RetrievalModeOption(
+                    label = "FILTERED",
+                    selected = retrievalMode == RetrievalMode.IMPROVED,
+                    enabled = !isLoading,
+                    onClick = { onRetrievalModeChange(RetrievalMode.IMPROVED) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
 
         Spacer(Modifier.height(8.dp))
         Text("Task Lifecycle", style = MaterialTheme.typography.titleMedium)
@@ -132,5 +166,40 @@ fun SettingsScreen(
                 TextButton(onClick = { showResetDialog = false }) { Text("Cancel") }
             }
         )
+    }
+}
+
+@Composable
+private fun RetrievalModeOption(
+    label: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val containerColor = if (selected) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.surface
+    }
+    val contentColor = if (selected) {
+        MaterialTheme.colorScheme.onPrimary
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier,
+        shape = RoundedCornerShape(14.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = containerColor,
+            contentColor = contentColor,
+            disabledContainerColor = containerColor.copy(alpha = 0.6f),
+            disabledContentColor = contentColor.copy(alpha = 0.8f)
+        )
+    ) {
+        Text(label)
     }
 }

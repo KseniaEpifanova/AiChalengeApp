@@ -70,6 +70,7 @@ fun ChatScreen(
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val strategy by viewModel.strategy.collectAsStateWithLifecycle()
     val ragEnabled by viewModel.ragEnabled.collectAsStateWithLifecycle()
+    val retrievalMode by viewModel.retrievalMode.collectAsStateWithLifecycle()
     val profile by viewModel.profile.collectAsStateWithLifecycle()
     val planningDraft by viewModel.planningDraft.collectAsStateWithLifecycle()
     val profileDirty by viewModel.profileDirty.collectAsStateWithLifecycle()
@@ -231,9 +232,11 @@ fun ChatScreen(
                     SettingsScreen(
                         currentStrategy = strategy.type,
                         ragEnabled = ragEnabled,
+                        retrievalMode = retrievalMode,
                         isLoading = isLoading,
                         onSelectStrategy = viewModel::setStrategyType,
                         onRagEnabledChange = viewModel::setRagEnabled,
+                        onRetrievalModeChange = viewModel::setRetrievalMode,
                         taskState = taskState,
                         onNextStep = viewModel::nextTaskStep,
                         onPause = viewModel::pauseTask,
