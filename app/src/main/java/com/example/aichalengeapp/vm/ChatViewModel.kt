@@ -19,6 +19,8 @@ import com.example.aichalengeapp.agent.task.TaskTransitionResult
 import com.example.aichalengeapp.data.AgentMessage
 import com.example.aichalengeapp.data.AgentRole
 import com.example.aichalengeapp.debug.TaskTrace
+import com.example.aichalengeapp.mcp.McpTrace
+import com.example.aichalengeapp.retrieval.RetrievalMode
 import com.example.aichalengeapp.ui.isTaskPanelVisible
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
@@ -79,6 +81,9 @@ class ChatViewModel @Inject constructor(
 
     private val _ragEnabled = MutableStateFlow(true)
     val ragEnabled: StateFlow<Boolean> = _ragEnabled.asStateFlow()
+
+    private val _retrievalMode = MutableStateFlow(RetrievalMode.BASELINE)
+    val retrievalMode: StateFlow<RetrievalMode> = _retrievalMode.asStateFlow()
 
     private val _factsJson = MutableStateFlow("")
     val factsJson: StateFlow<String> = _factsJson.asStateFlow()
@@ -328,6 +333,12 @@ class ChatViewModel @Inject constructor(
         _ragEnabled.value = enabled
     }
 
+    fun setRetrievalMode(mode: RetrievalMode) {
+        McpTrace.d("event" to "retrieval_mode_ui_click", "selected" to mode.name)
+        _retrievalMode.value = mode
+        McpTrace.d("event" to "retrieval_mode_selected", "mode" to mode.name)
+    }
+
     fun send(text: String) {
         val trimmed = text.trim()
         if (trimmed.isEmpty() || _isLoading.value) return
@@ -492,10 +503,11 @@ class ChatViewModel @Inject constructor(
 
             val cfg = _strategy.value.toConfig()
             val ragEnabled = _ragEnabled.value
+            val retrievalMode = _retrievalMode.value
             val reply = if (useBootstrapForTask) {
                 agentIo { handleTaskBootstrapMessage(trimmed, cfg) }
             } else {
-                agentIo { handleUserMessage(trimmed, cfg, ragEnabled = ragEnabled) }
+                agentIo { handleUserMessage(trimmed, cfg, ragEnabled = ragEnabled, retrievalMode = retrievalMode) }
             }
 
             removeMessageById(typingId)
@@ -541,6 +553,7 @@ class ChatViewModel @Inject constructor(
             _messages.value = emptyList()
             _strategy.value = StrategyUiState()
             _ragEnabled.value = true
+            _retrievalMode.value = RetrievalMode.BASELINE
             _factsJson.value = ""
             _workingJson.value = ""
             _longTermJson.value = ""

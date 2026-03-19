@@ -7,5 +7,7 @@ data class RetrievedChunk(
     val chunkId: String,
     val strategy: String?,
     val text: String,
-    val similarity: Double
+    val similarity: Double,
+    val finalScore: Double = similarity,
+    val boostReasons: List<String> = emptyList()
 )

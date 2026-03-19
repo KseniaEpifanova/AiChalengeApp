@@ -10,16 +10,29 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 interface DocumentRetriever {
-    suspend fun retrieve(query: String, topK: Int = 4): List<RetrievedChunk>
+    suspend fun retrieve(query: String, mode: RetrievalMode = RetrievalMode.IMPROVED): List<RetrievedChunk>
 }
 
 @Singleton
 class DocumentRetrieverImpl @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val embeddingProvider: QueryEmbeddingProvider
+    private val embeddingProvider: QueryEmbeddingProvider,
+    private val queryRewriter: QueryRewriter,
+    private val retrievalFilter: RetrievalFilter,
+    private val retrievalReranker: RetrievalReranker
 ) : DocumentRetriever {
-    override suspend fun retrieve(query: String, topK: Int): List<RetrievedChunk> {
-        McpTrace.d("event" to "retrieval_start", "query" to query, "topK" to topK)
+    override suspend fun retrieve(query: String, mode: RetrievalMode): List<RetrievedChunk> {
+        val config = RetrievalConfig.forMode(mode)
+        val rewrittenQuery = queryRewriter.rewrite(query, enabled = config.rewriteEnabled)
+        val rewriteApplied = rewrittenQuery != query.trim()
+        val lowConfidenceThreshold = config.similarityThreshold ?: 0.18
+        McpTrace.d(
+            "event" to "retrieval_start",
+            "query" to preview(query),
+            "mode" to modeLabel(mode),
+            "topKBefore" to config.topKBefore,
+            "topKAfter" to config.topKAfter
+        )
 
         val dbFile = ensureIndexDbAvailable() ?: run {
             McpTrace.d("event" to "retrieval_success", "reason" to "index_db_missing", "query" to query)
@@ -29,8 +42,6 @@ class DocumentRetrieverImpl @Inject constructor(
 
         val chunks = runCatching {
             SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READONLY).use { db ->
-                McpTrace.d("event" to "sqlite_index_opened", "path" to dbFile.absolutePath)
-
                 val candidates = db.query(
                     "chunks",
                     arrayOf("source", "title_or_file", "section", "chunk_id", "strategy", "text", "embedding_json"),
@@ -57,17 +68,16 @@ class DocumentRetrieverImpl @Inject constructor(
                     candidates
                 }
 
-                McpTrace.d("event" to "chunk_candidates_loaded", "count" to candidates.size)
                 val embeddingDimensions = candidates.firstOrNull()?.embedding?.size
                 if (embeddingDimensions == null || embeddingDimensions == 0) {
                     emptyList()
                 } else {
-                    val queryEmbedding = runCatching { embeddingProvider.embed(query, embeddingDimensions) }
+                    val queryEmbedding = runCatching { embeddingProvider.embed(rewrittenQuery, embeddingDimensions) }
                         .getOrElse { error ->
                             McpTrace.d(
                                 "event" to "retrieval_failure",
                                 "stage" to "query_embedding",
-                                "query" to query,
+                                "query" to rewrittenQuery,
                                 "error" to (error.message ?: error::class.java.simpleName)
                             )
                             return emptyList()
@@ -76,7 +86,8 @@ class DocumentRetrieverImpl @Inject constructor(
                     if (queryEmbedding == null || queryEmbedding.isEmpty()) {
                         emptyList()
                     } else {
-                        val results = candidates.map { candidate ->
+                        val scored = candidates.map { candidate ->
+                            val similarity = CosineSimilarity.compute(queryEmbedding, candidate.embedding)
                             RetrievedChunk(
                                 source = candidate.source,
                                 titleOrFile = candidate.titleOrFile,
@@ -84,20 +95,76 @@ class DocumentRetrieverImpl @Inject constructor(
                                 chunkId = candidate.chunkId,
                                 strategy = candidate.strategy,
                                 text = candidate.text,
-                                similarity = CosineSimilarity.compute(queryEmbedding, candidate.embedding)
+                                similarity = similarity
                             )
                         }
                             .sortedByDescending { it.similarity }
-                            .take(topK)
+
+                        val topBefore = scored.take(config.topKBefore)
+                        val topCandidate = topBefore.firstOrNull()
+                        McpTrace.d(
+                            "event" to "retrieval_topk_before_count",
+                            "count" to topBefore.size
+                        )
+
+                        val filtered = retrievalFilter.apply(
+                            chunks = topBefore,
+                            threshold = config.similarityThreshold,
+                            fallbackCount = config.topKAfter
+                        )
+                        if (config.similarityThreshold != null) {
+                            val strictKeptCount = topBefore.count { it.similarity >= config.similarityThreshold }
+                            McpTrace.d(
+                                "event" to "retrieval_threshold_applied",
+                                "threshold" to config.similarityThreshold,
+                                "inputCount" to topBefore.size,
+                                "keptCount" to strictKeptCount,
+                                "fallbackApplied" to false
+                            )
+                        }
+                        McpTrace.d(
+                            "event" to "retrieval_rerank_applied",
+                            "enabled" to config.rerankEnabled
+                        )
+                        val reranked = retrievalReranker.rerank(rewrittenQuery, filtered, enabled = config.rerankEnabled)
+                        val finalResults = reranked.take(config.topKAfter)
+                        if (topCandidate != null && topCandidate.similarity < lowConfidenceThreshold) {
+                            McpTrace.d(
+                                "event" to "retrieval_low_confidence",
+                                "query" to preview(query),
+                                "mode" to modeLabel(mode),
+                                "topSimilarity" to topCandidate.similarity,
+                                "topChunk" to topCandidate.titleOrFile.take(60)
+                            )
+                        }
+                        if (finalResults.isEmpty()) {
+                            McpTrace.d(
+                                "event" to "retrieval_no_match",
+                                "query" to preview(query),
+                                "mode" to modeLabel(mode),
+                                "topKBefore" to topBefore.size,
+                                "threshold" to config.similarityThreshold,
+                                "topSimilarity" to topCandidate?.similarity
+                            )
+                        }
+                        McpTrace.d(
+                            "event" to "retrieval_topk_after_count",
+                            "count" to finalResults.size
+                        )
+                        McpTrace.d("event" to "retrieval_final_chunks_count", "count" to finalResults.size)
 
                         McpTrace.d(
-                            "event" to "similarity_search_success",
-                            "query" to query,
-                            "dimensions" to embeddingDimensions,
-                            "returned" to results.size,
-                            "topSimilarity" to results.firstOrNull()?.similarity
+                            "event" to "retrieval_summary",
+                            "query" to preview(query),
+                            "mode" to modeLabel(mode),
+                            "rewriteApplied" to rewriteApplied,
+                            "topKBefore" to topBefore.size,
+                            "topKAfter" to finalResults.size,
+                            "top1Chunk" to finalResults.firstOrNull()?.titleOrFile?.take(60),
+                            "threshold" to config.similarityThreshold,
+                            "rerank" to config.rerankEnabled
                         )
-                        results
+                        finalResults
                     }
                 }
             }
@@ -111,9 +178,6 @@ class DocumentRetrieverImpl @Inject constructor(
             McpTrace.d("event" to "retrieval_success", "reason" to "sqlite_error", "error" to (it.message ?: it::class.java.simpleName))
             emptyList()
         }
-
-        McpTrace.d("event" to "retrieval_success", "query" to query, "topSimilarity" to chunks.firstOrNull()?.similarity)
-        McpTrace.d("event" to "retrieved_chunks_count", "count" to chunks.size)
         return chunks
     }
 
@@ -147,4 +211,15 @@ class DocumentRetrieverImpl @Inject constructor(
         val text: String,
         val embedding: FloatArray
     )
+
+    private fun preview(value: String, maxLength: Int = 120): String {
+        return if (value.length <= maxLength) value else value.take(maxLength) + "..."
+    }
+
+    private fun modeLabel(mode: RetrievalMode): String {
+        return when (mode) {
+            RetrievalMode.BASELINE -> "BASELINE"
+            RetrievalMode.IMPROVED -> "FILTERED"
+        }
+    }
 }

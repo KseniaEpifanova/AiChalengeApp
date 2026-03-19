@@ -58,17 +58,21 @@ class AgentOrchestrator @Inject constructor(
         )
     }
 
-    fun buildSystemPrompt(
+    fun buildContextSystemPrompt(
         basePrompt: String,
         context: AgentExecutionContext
     ): String {
-        return promptAssembler.assemble(
+        return promptAssembler.buildContextPrompt(
             basePrompt = basePrompt,
-            profile = context.activeProfile,
+            planningProfile = context.activeProfile.planningProfile,
             invariants = context.invariants,
             taskState = context.taskState,
             longTermJson = context.longTermJson,
             workingJson = context.workingJson
         )
+    }
+
+    fun buildProfileSystemPrompt(context: AgentExecutionContext): String {
+        return promptAssembler.buildProfilePrompt(context.activeProfile)
     }
 }

@@ -43,6 +43,7 @@ import com.example.aichalengeapp.mcp.pipeline.PipelineToolResponse
 import com.example.aichalengeapp.mcp.pipeline.PipelineToolRouter
 import com.example.aichalengeapp.retrieval.DocumentRetriever
 import com.example.aichalengeapp.retrieval.KnowledgeRouter
+import com.example.aichalengeapp.retrieval.RetrievalMode
 import com.example.aichalengeapp.retrieval.RetrievalPromptBuilder
 import com.example.aichalengeapp.retrieval.RetrievedChunk
 import com.example.aichalengeapp.repo.ChatRepository
@@ -246,7 +247,7 @@ class ChatAgentTest {
         val fixture = fixture(
             llmText = "Fallback LLM answer",
             documentRetriever = object : DocumentRetriever {
-                override suspend fun retrieve(query: String, topK: Int): List<RetrievedChunk> {
+                override suspend fun retrieve(query: String, mode: RetrievalMode): List<RetrievedChunk> {
                     error("HTTP 404")
                 }
             }
@@ -402,7 +403,7 @@ class ChatAgentTest {
             },
             knowledgeRouter = KnowledgeRouter(),
             documentRetriever = documentRetriever ?: object : DocumentRetriever {
-                override suspend fun retrieve(query: String, topK: Int): List<RetrievedChunk> {
+                override suspend fun retrieve(query: String, mode: RetrievalMode): List<RetrievedChunk> {
                     return if (query.contains("MCP connection", ignoreCase = true) || query.contains("MCP подключение", ignoreCase = true)) {
                         listOf(
                             RetrievedChunk(

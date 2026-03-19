@@ -40,6 +40,7 @@ import com.example.aichalengeapp.mcp.pipeline.PipelineToolResponse
 import com.example.aichalengeapp.mcp.pipeline.PipelineToolRouter
 import com.example.aichalengeapp.retrieval.DocumentRetriever
 import com.example.aichalengeapp.retrieval.KnowledgeRouter
+import com.example.aichalengeapp.retrieval.RetrievalMode
 import com.example.aichalengeapp.retrieval.RetrievalPromptBuilder
 import com.example.aichalengeapp.repo.ChatRepository
 import android.util.Log
@@ -79,6 +80,7 @@ class ChatAgent @Inject constructor(
 ) {
     private companion object {
         private const val TAG = "TaskClassifier"
+        private const val MAX_HISTORY_MESSAGES = 6
     }
 
     private val mutex = Mutex()
@@ -312,12 +314,14 @@ class ChatAgent @Inject constructor(
     suspend fun handleUserMessage(
         userText: String,
         strategyConfig: StrategyConfig,
-        ragEnabled: Boolean = true
+        ragEnabled: Boolean = true,
+        retrievalMode: RetrievalMode = RetrievalMode.IMPROVED
     ): AgentReply = handleUserMessageInternal(
         userText = userText,
         strategyConfig = strategyConfig,
         allowTaskAutoProgress = true,
-        ragEnabled = ragEnabled
+        ragEnabled = ragEnabled,
+        retrievalMode = retrievalMode
     )
 
     suspend fun handleTaskBootstrapMessage(
@@ -348,7 +352,8 @@ class ChatAgent @Inject constructor(
         allowTaskAutoProgress: Boolean,
         forcedIntent: TaskChatIntent? = null,
         transitionSource: String = "chat",
-        ragEnabled: Boolean = true
+        ragEnabled: Boolean = true,
+        retrievalMode: RetrievalMode = RetrievalMode.IMPROVED
     ): AgentReply = mutex.withLock {
         if (!initialized) init()
 
@@ -622,7 +627,8 @@ class ChatAgent @Inject constructor(
         com.example.aichalengeapp.mcp.McpTrace.d(
             "event" to "rag_mode_selected",
             "enabled" to ragEnabled,
-            "message" to trimmed
+            "message" to trimmed,
+            "retrievalMode" to retrievalMode
         )
         val retrievalContext = when {
             forcedIntent != null || transitionSource != "chat" -> null
@@ -637,14 +643,16 @@ class ChatAgent @Inject constructor(
             else -> {
                 com.example.aichalengeapp.mcp.McpTrace.d(
                     "event" to "rag_enabled_retrieval_start",
-                    "message" to trimmed
+                    "message" to trimmed,
+                    "retrievalMode" to retrievalMode
                 )
                 runCatching {
-                    val retrievedChunks = documentRetriever.retrieve(trimmed)
+                    val retrievedChunks = documentRetriever.retrieve(trimmed, retrievalMode)
                     com.example.aichalengeapp.mcp.McpTrace.d(
                         "event" to "rag_enabled_retrieval_success",
                         "message" to trimmed,
-                        "chunks" to retrievedChunks.size
+                        "chunks" to retrievedChunks.size,
+                        "retrievalMode" to retrievalMode
                     )
                     if (retrievedChunks.isNotEmpty()) {
                         com.example.aichalengeapp.mcp.McpTrace.d(
@@ -710,11 +718,12 @@ class ChatAgent @Inject constructor(
             "profile_constraints" to refreshedContext.activeProfile.responseProfile.constraints
         )
 
-        val systemPrompt = orchestrator.buildSystemPrompt(systemPromptBase, refreshedContext)
+        val contextSystemPrompt = orchestrator.buildContextSystemPrompt(systemPromptBase, refreshedContext)
+        val profileSystemPrompt = orchestrator.buildProfileSystemPrompt(refreshedContext)
         com.example.aichalengeapp.mcp.McpTrace.d(
             "event" to "prompt_contains_profile_rules",
-            "prompt_contains_profile_rules" to systemPrompt.contains("RESPONSE RULES (HIGHEST PRIORITY)"),
-            "system_prompt" to systemPrompt.take(1200)
+            "prompt_contains_profile_rules" to profileSystemPrompt.contains("RESPONSE PROFILE (HIGHEST PRIORITY)"),
+            "system_prompt" to profileSystemPrompt.take(1200)
         )
         TaskTrace.d(
             "event" to "llm_prompt_context",
@@ -724,15 +733,21 @@ class ChatAgent @Inject constructor(
             "guardActive" to guardActive
         )
 
+        val planSystemMessages = plan.messagesForLlm.filter { it.role == AgentRole.SYSTEM }
+        val planHistoryMessages = plan.messagesForLlm
+            .filter { it.role != AgentRole.SYSTEM }
+            .takeLast(MAX_HISTORY_MESSAGES)
         val llmMessages = buildList {
-            add(AgentMessage(AgentRole.SYSTEM, systemPrompt))
             if (!retrievalContext.isNullOrBlank()) {
                 add(AgentMessage(AgentRole.SYSTEM, retrievalContext))
             }
+            addAll(planSystemMessages)
+            add(AgentMessage(AgentRole.SYSTEM, contextSystemPrompt))
             if (stageChangedNotice != null) {
                 add(AgentMessage(AgentRole.SYSTEM, stageChangedNotice))
             }
-            addAll(plan.messagesForLlm)
+            add(AgentMessage(AgentRole.SYSTEM, profileSystemPrompt))
+            addAll(planHistoryMessages)
         }
         if (stageChangedNotice != null) {
             TaskTrace.d(
@@ -746,10 +761,18 @@ class ChatAgent @Inject constructor(
         }
 
         com.example.aichalengeapp.mcp.McpTrace.d(
+            "event" to "retrieval_system_prompt_present",
+            "present" to !retrievalContext.isNullOrBlank(),
+            "retrievalMode" to retrievalMode
+        )
+
+        com.example.aichalengeapp.mcp.McpTrace.d(
             "event" to "final_llm_request_messages",
             "count" to llmMessages.size,
             "roles" to llmMessages.joinToString(separator = ",") { it.role.name },
-            "lastUser" to llmMessages.lastOrNull { it.role == AgentRole.USER }?.content
+            "lastUser" to llmMessages.lastOrNull { it.role == AgentRole.USER }?.content,
+            "retrievalSystemPromptPresent" to !retrievalContext.isNullOrBlank(),
+            "lastSystemIsProfile" to (llmMessages.lastOrNull { it.role == AgentRole.SYSTEM }?.content == profileSystemPrompt)
         )
 
         val estimatedPrompt = tokenEstimator.estimateTokens(llmMessages)
@@ -757,7 +780,7 @@ class ChatAgent @Inject constructor(
         val estimatedHistory = (estimatedPrompt - estimatedUser).coerceAtLeast(0)
 
         val result = llmRepository.ask(llmMessages, maxOutputTokens = maxOutputTokens)
-        val rawAnswer = result.text.trim()
+        val rawAnswer = result.text
         TaskTrace.d(
             "event" to "llm_response",
             "source" to transitionSource,
@@ -771,16 +794,11 @@ class ChatAgent @Inject constructor(
             GuardResult.Ok -> rawAnswer
             is GuardResult.Violation -> buildInvariantViolationResponse(guardResult)
         }
-        val answer = applyResponseProfilePostProcessing(
-            text = guardedAnswer,
-            profile = refreshedContext.activeProfile
-        )
         com.example.aichalengeapp.mcp.McpTrace.d(
             "event" to "response_length_metrics",
-            "response_length_chars" to answer.length,
-            "response_length_sentences" to countSentences(answer)
+            "response_length_chars" to guardedAnswer.length
         )
-        appendAssistantMessage(strategyConfig, answer)
+        appendAssistantMessage(strategyConfig, guardedAnswer)
         shortTermStore.save(shortTerm)
 
         val activeProfile = profileResolver.resolve(profiles, activeProfileId)
@@ -807,7 +825,7 @@ class ChatAgent @Inject constructor(
         } else null
 
         AgentReply(
-            text = answer,
+            text = guardedAnswer,
             metrics = TokenMetrics(
                 estimatedUserTokens = estimatedUser,
                 estimatedHistoryTokens = estimatedHistory,
@@ -1221,57 +1239,6 @@ class ChatAgent @Inject constructor(
         } else {
             String.format(Locale.US, "%.4f", value).trimEnd('0').trimEnd('.')
         }
-    }
-
-    private fun applyResponseProfilePostProcessing(
-        text: String,
-        profile: AssistantProfile
-    ): String {
-        if (!requiresShortAnswer(profile)) return text
-
-        val normalized = text.trim()
-        val lines = normalized
-            .lines()
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
-
-        val bulletLines = lines.filter { line ->
-            line.startsWith("- ") || line.startsWith("• ") || Regex("""^\d+\.\s""").containsMatchIn(line)
-        }
-
-        return when {
-            bulletLines.isNotEmpty() -> bulletLines.take(4).joinToString("\n")
-            else -> {
-                splitSentences(normalized)
-                    .take(4)
-                    .joinToString(" ")
-                    .trim()
-            }
-        }
-    }
-
-    private fun requiresShortAnswer(profile: AssistantProfile): Boolean {
-        val combined = listOf(
-            profile.responseProfile.style,
-            profile.responseProfile.format,
-            profile.responseProfile.constraints
-        ).joinToString(" ").lowercase()
-
-        return combined.contains("short") ||
-            combined.contains("brief") ||
-            combined.contains("concise") ||
-            combined.contains("корот") ||
-            combined.contains("кратк") ||
-            combined.contains("сжато")
-    }
-
-    private fun countSentences(text: String): Int = splitSentences(text).size
-
-    private fun splitSentences(text: String): List<String> {
-        return text
-            .split(Regex("""(?<=[.!?])\s+"""))
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
     }
 
 }
