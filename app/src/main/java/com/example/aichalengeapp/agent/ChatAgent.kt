@@ -42,6 +42,7 @@ import com.example.aichalengeapp.retrieval.DocumentRetriever
 import com.example.aichalengeapp.retrieval.KnowledgeRouter
 import com.example.aichalengeapp.retrieval.RetrievalMode
 import com.example.aichalengeapp.retrieval.RetrievalPromptBuilder
+import com.example.aichalengeapp.retrieval.RetrievedChunk
 import com.example.aichalengeapp.repo.ChatRepository
 import android.util.Log
 import dagger.hilt.android.scopes.ViewModelScoped
@@ -81,6 +82,7 @@ class ChatAgent @Inject constructor(
     private companion object {
         private const val TAG = "TaskClassifier"
         private const val MAX_HISTORY_MESSAGES = 6
+        private const val MIN_GROUNDED_RETRIEVAL_SCORE = 0.20
     }
 
     private val mutex = Mutex()
@@ -648,13 +650,47 @@ class ChatAgent @Inject constructor(
                 )
                 runCatching {
                     val retrievedChunks = documentRetriever.retrieve(trimmed, retrievalMode)
+                    val topChunk = retrievedChunks.firstOrNull()
+                    val topRetrievedScore = retrievedChunks.maxOfOrNull { it.finalScore }
+                    val hasGroundingEvidence = topChunk?.let { hasGroundingEvidence(trimmed, it) } ?: false
+                    val noKnowledgeMode = retrievedChunks.isEmpty() ||
+                        (topRetrievedScore != null && topRetrievedScore < MIN_GROUNDED_RETRIEVAL_SCORE) ||
+                        !hasGroundingEvidence
+                    com.example.aichalengeapp.mcp.McpTrace.d(
+                        "event" to "answer_confidence_check",
+                        "message" to trimmed,
+                        "chunks" to retrievedChunks.size,
+                        "topScore" to topRetrievedScore,
+                        "groundingEvidence" to hasGroundingEvidence,
+                        "noKnowledgeMode" to noKnowledgeMode,
+                        "retrievalMode" to retrievalMode
+                    )
                     com.example.aichalengeapp.mcp.McpTrace.d(
                         "event" to "rag_enabled_retrieval_success",
                         "message" to trimmed,
                         "chunks" to retrievedChunks.size,
                         "retrievalMode" to retrievalMode
                     )
-                    if (retrievedChunks.isNotEmpty()) {
+                    if (noKnowledgeMode) {
+                        com.example.aichalengeapp.mcp.McpTrace.d(
+                            "event" to "answer_no_knowledge_mode",
+                            "message" to trimmed,
+                            "chunks" to retrievedChunks.size,
+                            "topScore" to topRetrievedScore,
+                            "retrievalMode" to retrievalMode
+                        )
+                        retrievalPromptBuilder.buildNoKnowledgePrompt(trimmed)
+                    } else if (retrievedChunks.isNotEmpty()) {
+                        com.example.aichalengeapp.mcp.McpTrace.d(
+                            "event" to "answer_sources_required",
+                            "message" to trimmed,
+                            "chunks" to retrievedChunks.size
+                        )
+                        com.example.aichalengeapp.mcp.McpTrace.d(
+                            "event" to "answer_quotes_required",
+                            "message" to trimmed,
+                            "chunks" to retrievedChunks.size
+                        )
                         com.example.aichalengeapp.mcp.McpTrace.d(
                             "event" to "rag_enabled_prompt_built",
                             "message" to trimmed,
@@ -1238,6 +1274,31 @@ class ChatAgent @Inject constructor(
             value.toLong().toString()
         } else {
             String.format(Locale.US, "%.4f", value).trimEnd('0').trimEnd('.')
+        }
+    }
+
+    private fun hasGroundingEvidence(question: String, chunk: RetrievedChunk): Boolean {
+        val title = chunk.titleOrFile.lowercase()
+        val section = chunk.section.orEmpty().lowercase()
+        val text = chunk.text.lowercase()
+        val queryTerms = question.lowercase()
+            .split(Regex("""[^\p{L}\p{N}_]+"""))
+            .filter { it.length >= 3 }
+        val codeTerms = Regex("""[A-Za-z_][A-Za-z0-9_]{2,}""")
+            .findAll(question)
+            .map { it.value.lowercase() }
+            .distinct()
+            .toList()
+
+        if (queryTerms.any { title.contains(it) || section.contains(it) }) {
+            return true
+        }
+
+        return codeTerms.any { term ->
+            title.contains(term) ||
+                section.contains(term) ||
+                Regex("""\b(class|object|interface|data\s+class)\s+${Regex.escape(term)}\b""").containsMatchIn(text) ||
+                Regex("""\bfun\s+${Regex.escape(term)}\b""").containsMatchIn(text)
         }
     }
 

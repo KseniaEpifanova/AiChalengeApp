@@ -16,6 +16,7 @@ class RetrievalPromptBuilder @Inject constructor() {
                 }
                 append("\nCHUNK_ID: ").append(chunk.chunkId)
                 append("\nSIMILARITY: ").append(String.format("%.4f", chunk.similarity))
+                append("\nQUOTE_SNIPPET: \"").append(toQuoteSnippet(chunk.text)).append('"')
                 append("\nTEXT:\n").append(chunk.text)
             }
         }
@@ -25,13 +26,63 @@ class RetrievalPromptBuilder @Inject constructor() {
             The following context was retrieved from the local documentation/project index for the user's question:
             "$userQuestion"
 
-            Use this context when answering. Prefer retrieved facts over guesses.
-            If the retrieved context is incomplete, say what is known and what is missing.
+            You MUST answer using only the retrieved context below.
+            Do NOT invent facts, source names, section names, chunk IDs, or quotes.
+            Every grounded answer MUST use this exact structure:
+
+            Answer:
+            <your answer based only on the retrieved context>
+
+            Sources:
+            - source: <actual SOURCE value>
+              file: <actual FILE value>
+              section: <actual SECTION value or n/a>
+              chunk_id: <actual CHUNK_ID value>
+
+            Quotes:
+            - "<short verbatim quote from the retrieved context>"
+            - "<short verbatim quote from the retrieved context>"
+
+            Rules:
+            - Sources must reflect actual retrieved metadata only.
+            - Quotes must be short and copied verbatim only from retrieved chunks.
+            - If the retrieved context is incomplete, state only what is supported by the context.
 
             $renderedChunks
         """.trimIndent()
 
         McpTrace.d("event" to "retrieval_prompt_built", "chunks" to chunks.size)
         return prompt
+    }
+
+    fun buildNoKnowledgePrompt(userQuestion: String): String {
+        return """
+            RETRIEVAL CONFIDENCE GATE
+            The retrieved context for the user's question is empty or too weak to support a grounded answer:
+            "$userQuestion"
+
+            You MUST NOT guess.
+            You MUST respond exactly in this structure:
+
+            Answer:
+            I don't know based on the retrieved context.
+
+            Sources:
+            - no relevant sources
+
+            Quotes:
+            - no relevant quotes
+
+            Clarification:
+            Please specify the class, file, or method name.
+        """.trimIndent()
+    }
+
+    private fun toQuoteSnippet(text: String, maxLength: Int = 140): String {
+        val normalized = text
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+            .replace("\"", "'")
+        return if (normalized.length <= maxLength) normalized else normalized.take(maxLength).trimEnd() + "..."
     }
 }
