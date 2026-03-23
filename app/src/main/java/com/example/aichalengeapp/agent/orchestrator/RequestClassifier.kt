@@ -30,9 +30,9 @@ class RequestClassifier @Inject constructor() {
     }
 
     private val intentMarkers = setOf(
-        "design", "architect", "implement", "build", "develop", "plan", "structure",
-        "create", "refactor", "workflow", "system", "feature",
-        "спроект", "разработ", "реализ", "архитект", "продум", "созда", "сдела", "помоги"
+        "design", "architect", "implement", "build", "develop",
+        "create", "refactor", "fix", "add", "write",
+        "спроект", "разработ", "реализ", "архитект", "продум", "созда", "сдела", "исправ", "добав", "напиш"
     )
     private val structureMarkers = setOf(
         "screen", "ui", "state", "data", "api", "navigation", "filters", "search", "flow", "system", "feature",
@@ -121,6 +121,20 @@ class RequestClassifier @Inject constructor() {
 
         var score = 0
         val reasons = mutableListOf<String>()
+        val triggerSignals = TaskTriggerHeuristics.analyze(text)
+
+        if (triggerSignals.hasExplorationSignals && !triggerSignals.hasExecutionSignals) {
+            return ClassificationDecision(
+                kind = RequestKind.SIMPLE,
+                score = 0,
+                threshold = Int.MAX_VALUE,
+                ambiguous = false,
+                reasons = listOf(
+                    "exploration_only",
+                    "exploration_hits=${triggerSignals.explorationHits.joinToString("|")}"
+                )
+            )
+        }
 
         val intentHits = intentMarkers.count { marker -> text.contains(marker) }
         if (intentHits > 0) {
@@ -180,7 +194,7 @@ class RequestClassifier @Inject constructor() {
         val isMobileDeveloperProfile = profileKey.contains("mobile_developer") ||
             profileKey.contains("mobile developer") ||
             profileKey.contains("developer")
-        if (isMobileDeveloperProfile) {
+        if (isMobileDeveloperProfile && triggerSignals.hasExecutionSignals) {
             val developerHits = developerDomainMarkers.count { marker -> text.contains(marker) }
             if (developerHits >= 2) {
                 score += 3

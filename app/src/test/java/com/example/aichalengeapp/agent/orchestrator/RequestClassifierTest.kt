@@ -94,6 +94,33 @@ class RequestClassifierTest {
     }
 
     @Test
+    fun `exploration request stays simple for mobile developer high`() {
+        val decision = classifier.classifyForProfile(
+            "Я хочу понять, как в проекте устроен чат. Начни с общего обзора ChatAgent и ViewModel.",
+            mobileDeveloper()
+        )
+        assertEquals(RequestKind.SIMPLE, decision.kind)
+    }
+
+    @Test
+    fun `explanation request about retriever stays simple`() {
+        val decision = classifier.classifyForProfile(
+            "Расскажи, как работает DocumentRetriever.",
+            mobileDeveloper()
+        )
+        assertEquals(RequestKind.SIMPLE, decision.kind)
+    }
+
+    @Test
+    fun `explicit implementation request remains complex`() {
+        val decision = classifier.classifyForProfile(
+            "Реализуй reranker после retrieval.",
+            mobileDeveloper()
+        )
+        assertEquals(RequestKind.COMPLEX, decision.kind)
+    }
+
+    @Test
     fun `auto detect disabled keeps complex request simple`() {
         val decision = classifier.classifyForProfile(
             "Design and implement screen flow with state and navigation",
