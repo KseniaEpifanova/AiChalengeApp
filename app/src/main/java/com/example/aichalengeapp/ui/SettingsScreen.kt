@@ -1,5 +1,7 @@
 package com.example.aichalengeapp.ui
 
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -7,11 +9,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -24,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.example.aichalengeapp.repo.LlmProvider
 import com.example.aichalengeapp.agent.task.TaskStage
 import com.example.aichalengeapp.agent.task.TaskState
 import com.example.aichalengeapp.retrieval.RetrievalMode
@@ -34,10 +40,14 @@ fun SettingsScreen(
     currentStrategy: ChatViewModel.StrategyTypeUi,
     ragEnabled: Boolean,
     retrievalMode: RetrievalMode,
+    llmProvider: LlmProvider,
+    localLlmBaseUrl: String,
     isLoading: Boolean,
     onSelectStrategy: (ChatViewModel.StrategyTypeUi) -> Unit,
     onRagEnabledChange: (Boolean) -> Unit,
     onRetrievalModeChange: (RetrievalMode) -> Unit,
+    onLlmProviderChange: (LlmProvider) -> Unit,
+    onLocalLlmBaseUrlChange: (String) -> Unit,
     taskState: TaskState?,
     onNextStep: () -> Unit,
     onPause: () -> Unit,
@@ -50,6 +60,9 @@ fun SettingsScreen(
 
     Column(
         modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .navigationBarsPadding()
+            .imePadding()
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -76,6 +89,45 @@ fun SettingsScreen(
             ) { Text("Branching") }
         }
         Text("Current strategy: $currentStrategy", style = MaterialTheme.typography.bodySmall)
+
+        Spacer(Modifier.height(8.dp))
+        Text("LLM Provider", style = MaterialTheme.typography.titleMedium)
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SegmentedOptionButton(
+                    label = "REMOTE",
+                    selected = llmProvider == LlmProvider.REMOTE,
+                    enabled = !isLoading,
+                    onClick = { onLlmProviderChange(LlmProvider.REMOTE) },
+                    modifier = Modifier.weight(1f)
+                )
+                SegmentedOptionButton(
+                    label = "LOCAL",
+                    selected = llmProvider == LlmProvider.LOCAL,
+                    enabled = !isLoading,
+                    onClick = { onLlmProviderChange(LlmProvider.LOCAL) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+        OutlinedTextField(
+            value = localLlmBaseUrl,
+            onValueChange = onLocalLlmBaseUrlChange,
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !isLoading,
+            singleLine = true,
+            label = { Text("Ollama base URL") },
+            supportingText = { Text("Emulator default: http://10.0.2.2:11434") }
+        )
 
         Spacer(Modifier.height(8.dp))
         Text("Retrieval Mode", style = MaterialTheme.typography.titleMedium)
@@ -107,14 +159,14 @@ fun SettingsScreen(
                     .padding(6.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                RetrievalModeOption(
+                SegmentedOptionButton(
                     label = "BASELINE",
                     selected = retrievalMode == RetrievalMode.BASELINE,
                     enabled = !isLoading,
                     onClick = { onRetrievalModeChange(RetrievalMode.BASELINE) },
                     modifier = Modifier.weight(1f)
                 )
-                RetrievalModeOption(
+                SegmentedOptionButton(
                     label = "FILTERED",
                     selected = retrievalMode == RetrievalMode.IMPROVED,
                     enabled = !isLoading,
@@ -170,7 +222,7 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun RetrievalModeOption(
+private fun SegmentedOptionButton(
     label: String,
     selected: Boolean,
     enabled: Boolean,

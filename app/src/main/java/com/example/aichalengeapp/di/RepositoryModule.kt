@@ -2,8 +2,12 @@ package com.example.aichalengeapp.di
 
 import com.example.aichalengeapp.repo.ChatRepository
 import com.example.aichalengeapp.repo.ChatRepositoryImpl
+import com.example.aichalengeapp.repo.DataStoreLlmSettingsStore
 import com.example.aichalengeapp.repo.EmbeddingRepository
 import com.example.aichalengeapp.repo.EmbeddingRepositoryImpl
+import com.example.aichalengeapp.repo.LlmSettingsStore
+import com.example.aichalengeapp.repo.LocalLlmRepository
+import com.example.aichalengeapp.repo.OllamaLocalLlmRepository
 import com.example.aichalengeapp.retrieval.DocumentRetriever
 import com.example.aichalengeapp.retrieval.DocumentRetrieverImpl
 import com.example.aichalengeapp.retrieval.QueryEmbeddingProvider
@@ -23,6 +27,18 @@ abstract class RepositoryModule {
     abstract fun bindLlmRepository(
         impl: ChatRepositoryImpl
     ): ChatRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindLocalLlmRepository(
+        impl: OllamaLocalLlmRepository
+    ): LocalLlmRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindLlmSettingsStore(
+        impl: DataStoreLlmSettingsStore
+    ): LlmSettingsStore
 
     @Binds
     @Singleton

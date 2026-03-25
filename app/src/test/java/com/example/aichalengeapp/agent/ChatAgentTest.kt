@@ -243,6 +243,18 @@ class ChatAgentTest {
     }
 
     @Test
+    fun `ordinary chat question does not inject retrieval prompt`() = runSuspending {
+        val fixture = fixture("I am your assistant.")
+        fixture.agent.init()
+
+        fixture.agent.handleUserMessage("Who are you?", StrategyConfig.SlidingWindow())
+
+        val systemMessages = fixture.repo.lastMessages.filter { it.role == com.example.aichalengeapp.data.AgentRole.SYSTEM }
+        assertTrue(systemMessages.none { it.content.contains("RETRIEVED PROJECT KNOWLEDGE") })
+        assertTrue(systemMessages.none { it.content.contains("I don't know based on the retrieved context.") })
+    }
+
+    @Test
     fun `knowledge retrieval failure falls back to llm for same message`() = runSuspending {
         val fixture = fixture(
             llmText = "Fallback LLM answer",

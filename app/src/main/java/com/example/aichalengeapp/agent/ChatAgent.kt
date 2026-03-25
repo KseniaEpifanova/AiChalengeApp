@@ -17,6 +17,7 @@ import com.example.aichalengeapp.agent.orchestrator.RequestKind
 import com.example.aichalengeapp.agent.orchestrator.TaskChatIntent
 import com.example.aichalengeapp.agent.orchestrator.TaskConflictDetector
 import com.example.aichalengeapp.agent.orchestrator.TaskIntentDetector
+import com.example.aichalengeapp.agent.orchestrator.TaskTriggerHeuristics
 import com.example.aichalengeapp.agent.profile.AssistantProfile
 import com.example.aichalengeapp.agent.profile.AssistantProfilesStore
 import com.example.aichalengeapp.agent.profile.ResponseProfile
@@ -552,7 +553,27 @@ class ChatAgent @Inject constructor(
             )
         }
 
-        if (taskState == null && (normalizedIntent == TaskChatIntent.START_COMPLEX_TASK || context.requestKind == RequestKind.COMPLEX)) {
+        val triggerSignals = TaskTriggerHeuristics.analyze(trimmed)
+        val autoStartDecision = TaskTriggerHeuristics.evaluateAutoStart(
+            message = trimmed,
+            requestKind = context.requestKind,
+            normalizedIntent = normalizedIntent
+        )
+        val shouldStartTask = taskState == null && autoStartDecision.shouldStartTask
+        com.example.aichalengeapp.mcp.McpTrace.d(
+            "event" to "task_trigger_evaluated",
+            "message" to trimmed,
+            "hasExecutionSignals" to triggerSignals.hasExecutionSignals,
+            "hasExplorationSignals" to triggerSignals.hasExplorationSignals,
+            "hasSocialSignals" to triggerSignals.hasSocialSignals,
+            "requestKind" to context.requestKind,
+            "normalizedIntent" to normalizedIntent,
+            "reason" to autoStartDecision.reason,
+            "evidence" to autoStartDecision.evidence.joinToString(","),
+            "decision" to if (shouldStartTask) "START_TASK" else "NORMAL_CHAT"
+        )
+
+        if (shouldStartTask) {
             taskState = taskManager.startTask(trimmed)
             taskStartedThisTurn = true
             workingJson = workingStore.loadJson()

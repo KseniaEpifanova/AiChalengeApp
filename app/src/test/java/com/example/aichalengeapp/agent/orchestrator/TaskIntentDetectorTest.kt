@@ -24,6 +24,38 @@ class TaskIntentDetectorTest {
         assertIntent("NONE", "какая сегодня погода", TaskChatIntent.NONE)
     }
 
+    @Test
+    fun `exploration request short circuits to none when no active task`() = runBlocking {
+        val repo = object : ChatRepository {
+            override suspend fun ask(messages: List<AgentMessage>, maxOutputTokens: Int?): LlmResult {
+                return LlmResult("START_COMPLEX_TASK")
+            }
+        }
+        val detector = TaskIntentDetector(repo)
+        val result = detector.detect(
+            message = "Я хочу понять, как в проекте устроен чат. Начни с общего обзора ChatAgent и ViewModel.",
+            activeProfile = AssistantProfile.mobileDeveloper(),
+            taskState = null
+        )
+        assertEquals(TaskChatIntent.NONE, result.intent)
+    }
+
+    @Test
+    fun `social request short circuits to none when no active task`() = runBlocking {
+        val repo = object : ChatRepository {
+            override suspend fun ask(messages: List<AgentMessage>, maxOutputTokens: Int?): LlmResult {
+                return LlmResult("START_COMPLEX_TASK")
+            }
+        }
+        val detector = TaskIntentDetector(repo)
+        val result = detector.detect(
+            message = "привет",
+            activeProfile = AssistantProfile.mobileDeveloper(),
+            taskState = null
+        )
+        assertEquals(TaskChatIntent.NONE, result.intent)
+    }
+
     private suspend fun assertIntent(
         llmLabel: String,
         message: String,

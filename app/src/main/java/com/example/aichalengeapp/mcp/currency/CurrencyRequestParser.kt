@@ -8,83 +8,83 @@ class CurrencyRequestParser @Inject constructor() {
 
     private val codeRegex = Regex("""(?iu)\b([A-Za-z]{3})\b""")
     private val amountRegex = Regex("""(?iu)(\d+(?:[.,]\d+)?)""")
+    private val connectorRegex = Regex("""(?iu)\b(to|in|в|к)\b|/|->""")
 
     private val namedCurrencies = linkedMapOf(
         "евро" to "EUR",
         "доллар" to "USD",
-        "доллара" to "USD",
-        "доллару" to "USD",
         "usd" to "USD",
         "eur" to "EUR",
         "gbp" to "GBP",
         "фунт" to "GBP",
-        "фунта" to "GBP",
+        "jpy" to "JPY",
         "иен" to "JPY",
         "йен" to "JPY",
-        "jpy" to "JPY",
         "рубл" to "RUB",
-        "rub" to "RUB"
+        "rub" to "RUB",
+        "aud" to "AUD",
+        "cad" to "CAD",
+        "chf" to "CHF",
+        "cny" to "CNY"
     )
 
-    private val summaryKeywords = listOf(
-        "сводка",
-        "сводку",
-        "summary",
-        "статистик",
-        "статистика",
-        "анализ",
-        "history",
-        "истори",
-        "min",
-        "max",
-        "average",
-        "средн"
+    private val supportedCodes = namedCurrencies.values.toSet()
+
+    private val currencyKeywordRoots = listOf(
+        "курс", "валют", "обмен", "convert", "rate", "exchange", "сколько"
+    )
+    private val summaryKeywordRoots = listOf(
+        "свод", "статист", "анализ", "history", "summary", "average", "средн", "min", "max"
     )
 
     fun parseIntent(raw: String): CurrencyToolIntent? {
         val text = raw.trim()
         if (text.isEmpty()) return null
 
-        val isSummary = containsSummaryKeyword(text)
-        val upper = text.uppercase()
-        val codeHits = codeRegex.findAll(upper)
-            .map { it.groupValues[1].uppercase() }
-            .distinct()
-            .toList()
-
-        val amount = amountRegex.find(text)?.groupValues?.getOrNull(1)?.toDoubleOrNullFlexible()
-
-        if (codeHits.size >= 2) {
-            return CurrencyToolIntent(
-                base = codeHits[0],
-                target = codeHits[1],
-                amount = if (isSummary) null else amount,
-                isSummary = isSummary
-            )
+        val codes = extractValidatedCodes(text)
+        val names = extractNamedCurrencies(text)
+        val currencies = when {
+            codes.size >= 2 -> codes
+            names.size >= 2 -> names
+            else -> return null
         }
 
+        val amount = amountRegex.find(text)?.groupValues?.getOrNull(1)?.toDoubleOrNullFlexible()
+        val isSummary = containsRoot(text, summaryKeywordRoots)
+        val hasCurrencyKeyword = containsRoot(text, currencyKeywordRoots)
+        val hasConnector = connectorRegex.containsMatchIn(text)
+        val hasExplicitEvidence = isSummary || hasCurrencyKeyword || (amount != null && hasConnector)
+
+        if (!hasExplicitEvidence) return null
+
+        return CurrencyToolIntent(
+            base = currencies[0],
+            target = currencies[1],
+            amount = if (isSummary) null else amount,
+            isSummary = isSummary
+        )
+    }
+
+    private fun extractValidatedCodes(text: String): List<String> {
+        return codeRegex.findAll(text.uppercase())
+            .map { it.groupValues[1].uppercase() }
+            .filter { it in supportedCodes }
+            .distinct()
+            .toList()
+    }
+
+    private fun extractNamedCurrencies(text: String): List<String> {
         val lowered = text.lowercase()
-        val namedHits = namedCurrencies.entries
+        return namedCurrencies.entries
             .filter { lowered.contains(it.key) }
             .map { it.value }
             .distinct()
             .toList()
-
-        if (namedHits.size >= 2) {
-            return CurrencyToolIntent(
-                base = namedHits[0],
-                target = namedHits[1],
-                amount = if (isSummary) null else amount,
-                isSummary = isSummary
-            )
-        }
-
-        return null
     }
 
-    private fun containsSummaryKeyword(text: String): Boolean {
+    private fun containsRoot(text: String, roots: List<String>): Boolean {
         val lowered = text.lowercase()
-        return summaryKeywords.any { lowered.contains(it) }
+        return roots.any { lowered.contains(it) }
     }
 
     private fun String.toDoubleOrNullFlexible(): Double? {

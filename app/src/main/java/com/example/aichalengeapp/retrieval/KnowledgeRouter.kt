@@ -6,119 +6,138 @@ import javax.inject.Singleton
 
 @Singleton
 class KnowledgeRouter @Inject constructor() {
-    private val knowledgeQuestionSignals = listOf(
-        "how",
-        "where",
-        "what",
-        "explain",
-        "describe",
-        "show",
-        "implemented",
-        "located",
-        "works",
-        "покажи",
-        "как",
-        "где",
-        "объясни",
-        "расскажи",
-        "реализ",
-        "наход",
-        "работ"
+
+    private val explorationTokens = setOf(
+        "how", "where", "what", "explain", "describe", "show",
+        "как", "где", "что", "объясни", "расскажи", "покажи"
     )
 
-    private val projectKnowledgeSignals = listOf(
-        "mcp",
-        "connection",
-        "connect",
-        "profile",
-        "task lifecycle",
-        "task",
-        "chat agent",
-        "agent",
-        "guard",
-        "invariant",
-        "repository",
-        "retrieval",
-        "index",
-        "sqlite",
-        "orchestrator",
-        "viewmodel",
-        "retriever",
-        "embedding",
-        "provider",
-        "similarity",
-        "cosine",
-        "document",
-        "chunk",
-        "agentorchestrator",
-        "chatviewmodel",
-        "documentretriever",
-        "queryembeddingproviderimpl",
-        "cosinesimilarity",
-        "mcpclientmanager",
-        "подключение",
-        "профил",
-        "задач",
-        "жизненн",
-        "агент",
-        "логика",
-        "репозитор",
-        "индекс",
-        "оркестратор",
-        "ретрив",
-        "эмбед",
-        "сходств",
-        "документ",
-        "чанк",
-        "модел"
+    private val projectRoots = listOf(
+        "project", "codebase", "file", "class", "method", "module", "implementation", "architecture",
+        "проект", "код", "файл", "класс", "метод", "модул", "архитект", "реализ", "хран"
+    )
+
+    private val technicalRoots = listOf(
+        "mcp", "retrieval", "embedding", "sqlite", "rag", "pipeline", "chunk", "prompt",
+        "ретрив", "эмбед", "индекс", "чанк", "промпт", "пайплайн"
     )
 
     fun shouldRetrieve(message: String): Boolean {
-        val normalized = message.trim()
-        if (normalized.isEmpty()) return false
-
-        val lowered = normalized.lowercase()
-        val matchedQuestionSignals = knowledgeQuestionSignals.filter { lowered.contains(it) }.distinct()
-        val matchedProjectSignals = projectKnowledgeSignals.filter { lowered.contains(it) }.distinct()
-        val detectedCodeTerms = detectCodeTerms(normalized)
-        val hasQuestionSignal = matchedQuestionSignals.isNotEmpty() || normalized.contains("?")
-        val hasProjectSignal = matchedProjectSignals.isNotEmpty() || detectedCodeTerms.isNotEmpty()
-
-        val matches = hasQuestionSignal && hasProjectSignal
-        if (matches) {
+        val decision = evaluate(message)
+        if (decision.matches) {
             McpTrace.d(
                 "event" to "knowledge_router_match",
-                "message" to normalized,
-                "questionSignals" to matchedQuestionSignals.joinToString(","),
-                "projectSignals" to matchedProjectSignals.joinToString(","),
-                "codeTerms" to detectedCodeTerms.joinToString(",")
+                "message" to decision.message,
+                "reason" to decision.reason,
+                "questionSignals" to decision.questionSignals.joinToString(","),
+                "groundingSignals" to decision.groundingSignals.joinToString(","),
+                "codeTerms" to decision.codeTerms.joinToString(",")
+            )
+        } else {
+            McpTrace.d(
+                "event" to "knowledge_router_no_match",
+                "message" to decision.message,
+                "reason" to decision.reason,
+                "questionSignals" to decision.questionSignals.joinToString(","),
+                "groundingSignals" to decision.groundingSignals.joinToString(","),
+                "codeTerms" to decision.codeTerms.joinToString(",")
             )
         }
-        return matches
+        return decision.matches
+    }
+
+    private fun evaluate(message: String): RoutingDecision {
+        val normalized = message.trim()
+        if (normalized.isEmpty()) {
+            return RoutingDecision(
+                message = normalized,
+                matches = false,
+                reason = "empty_message"
+            )
+        }
+
+        val lowered = normalized.lowercase()
+        val questionSignals = buildList {
+            addAll(explorationTokens.filter { lowered.contains(it) })
+            if (normalized.contains("?")) add("question_mark")
+        }.distinct()
+
+        val explicitProjectSignals = buildList {
+            addAll(projectRoots.filter { lowered.contains(it) })
+            addAll(technicalRoots.filter { lowered.contains(it) })
+        }.distinct()
+
+        val codeTerms = detectCodeTerms(normalized)
+        val hasQuestionIntent = questionSignals.isNotEmpty()
+        val hasGroundedProjectEvidence = explicitProjectSignals.isNotEmpty() || codeTerms.isNotEmpty()
+
+        if (!hasQuestionIntent) {
+            return RoutingDecision(
+                message = normalized,
+                matches = false,
+                reason = "no_question_or_exploration_intent",
+                questionSignals = questionSignals,
+                groundingSignals = explicitProjectSignals,
+                codeTerms = codeTerms
+            )
+        }
+
+        if (!hasGroundedProjectEvidence) {
+            return RoutingDecision(
+                message = normalized,
+                matches = false,
+                reason = "missing_project_grounding",
+                questionSignals = questionSignals,
+                groundingSignals = explicitProjectSignals,
+                codeTerms = codeTerms
+            )
+        }
+
+        return RoutingDecision(
+            message = normalized,
+            matches = true,
+            reason = if (codeTerms.isNotEmpty()) "strong_code_entity_detected" else "explicit_project_context",
+            questionSignals = questionSignals,
+            groundingSignals = explicitProjectSignals,
+            codeTerms = codeTerms
+        )
     }
 
     private fun detectCodeTerms(message: String): List<String> {
-        return CODE_TERM_REGEX
-            .findAll(message)
+        return CODE_TERM_REGEX.findAll(message)
             .map { it.value }
             .filter { value ->
-                val isLikelyAcronym = value.all { it.isUpperCase() } && value.length <= 4
-                val hasCodeShape = !isLikelyAcronym && (
-                    value.any { it.isUpperCase() } ||
-                    value.contains("viewmodel", ignoreCase = true) ||
-                    value.contains("retriever", ignoreCase = true) ||
-                    value.contains("provider", ignoreCase = true) ||
-                    value.contains("orchestrator", ignoreCase = true) ||
-                    value.contains("similarity", ignoreCase = true) ||
-                    value.contains("manager", ignoreCase = true)
-                )
-                hasCodeShape
+                hasStrongCodeShape(value) || hasCodeSuffix(value) || value.endsWith(".kt", ignoreCase = true)
             }
             .distinct()
             .toList()
     }
 
+    private fun hasStrongCodeShape(value: String): Boolean {
+        val isShortAcronym = value.length <= 4 && value.all { it.isUpperCase() }
+        if (isShortAcronym) return false
+        return value.drop(1).any { it.isUpperCase() } || value.contains('_')
+    }
+
+    private fun hasCodeSuffix(value: String): Boolean {
+        return CODE_SUFFIXES.any { suffix ->
+            value.endsWith(suffix, ignoreCase = false) && value.length > suffix.length
+        }
+    }
+
+    private data class RoutingDecision(
+        val message: String,
+        val matches: Boolean,
+        val reason: String,
+        val questionSignals: List<String> = emptyList(),
+        val groundingSignals: List<String> = emptyList(),
+        val codeTerms: List<String> = emptyList()
+    )
+
     private companion object {
-        val CODE_TERM_REGEX = Regex("""[A-Za-z][A-Za-z0-9_]{2,}""")
+        val CODE_TERM_REGEX = Regex("""[A-Za-z][A-Za-z0-9_.]{2,}""")
+        val CODE_SUFFIXES = listOf(
+            "ViewModel", "Manager", "Retriever", "Provider", "Router", "Repository", "Orchestrator", "Client", "Agent"
+        )
     }
 }

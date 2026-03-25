@@ -28,6 +28,36 @@ class TaskIntentDetector @Inject constructor(
             return IntentDecision(TaskChatIntent.NONE, "NONE")
         }
 
+        val triggerSignals = TaskTriggerHeuristics.analyze(normalized)
+        if (taskState == null && triggerSignals.hasSocialSignals && !triggerSignals.hasExecutionSignals && !triggerSignals.hasExplorationSignals) {
+            TaskTrace.d(
+                "event" to "intent_detected",
+                "source" to source,
+                "taskId" to TaskTrace.taskId(taskState),
+                "msg" to normalized,
+                "profileId" to activeProfile.id,
+                "profileName" to activeProfile.name,
+                "beforeStage" to taskState?.stage,
+                "intent" to TaskChatIntent.NONE,
+                "rawIntent" to "SOCIAL_SHORT_CIRCUIT"
+            )
+            return IntentDecision(TaskChatIntent.NONE, "SOCIAL_SHORT_CIRCUIT")
+        }
+        if (taskState == null && triggerSignals.hasExplorationSignals && !triggerSignals.hasExecutionSignals) {
+            TaskTrace.d(
+                "event" to "intent_detected",
+                "source" to source,
+                "taskId" to TaskTrace.taskId(taskState),
+                "msg" to normalized,
+                "profileId" to activeProfile.id,
+                "profileName" to activeProfile.name,
+                "beforeStage" to taskState?.stage,
+                "intent" to TaskChatIntent.NONE,
+                "rawIntent" to "EXPLORATION_SHORT_CIRCUIT"
+            )
+            return IntentDecision(TaskChatIntent.NONE, "EXPLORATION_SHORT_CIRCUIT")
+        }
+
         val profileBlock = """
             PROFILE:
             id=${activeProfile.id}
