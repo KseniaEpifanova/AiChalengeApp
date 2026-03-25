@@ -554,15 +554,22 @@ class ChatAgent @Inject constructor(
         }
 
         val triggerSignals = TaskTriggerHeuristics.analyze(trimmed)
-        val shouldStartTask = taskState == null &&
-            (normalizedIntent == TaskChatIntent.START_COMPLEX_TASK || context.requestKind == RequestKind.COMPLEX)
+        val autoStartDecision = TaskTriggerHeuristics.evaluateAutoStart(
+            message = trimmed,
+            requestKind = context.requestKind,
+            normalizedIntent = normalizedIntent
+        )
+        val shouldStartTask = taskState == null && autoStartDecision.shouldStartTask
         com.example.aichalengeapp.mcp.McpTrace.d(
             "event" to "task_trigger_evaluated",
             "message" to trimmed,
             "hasExecutionSignals" to triggerSignals.hasExecutionSignals,
             "hasExplorationSignals" to triggerSignals.hasExplorationSignals,
+            "hasSocialSignals" to triggerSignals.hasSocialSignals,
             "requestKind" to context.requestKind,
             "normalizedIntent" to normalizedIntent,
+            "reason" to autoStartDecision.reason,
+            "evidence" to autoStartDecision.evidence.joinToString(","),
             "decision" to if (shouldStartTask) "START_TASK" else "NORMAL_CHAT"
         )
 

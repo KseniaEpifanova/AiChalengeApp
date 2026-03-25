@@ -24,12 +24,14 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         val deepSeekApiKey = (project.findProperty("DEEPSEEK_API_KEY") as String?) ?: ""
         val deepSeekBaseUrl = (project.findProperty("DEEPSEEK_BASE_URL") as String?) ?: "https://api.deepseek.com/v1/"
+        val ollamaBaseUrl = (project.findProperty("OLLAMA_BASE_URL") as String?) ?: "http://10.0.2.2:11434"
         val mcpBaseUrl = (project.findProperty("MCP_BASE_URL") as String?) ?: "https://prompts.chat/api/mcp"
         val mcpCurrencyBaseUrl = (project.findProperty("MCP_CURRENCY_BASE_URL") as String?) ?: mcpBaseUrl
         val mcpPipelineBaseUrl = (project.findProperty("MCP_PIPELINE_BASE_URL") as String?) ?: mcpBaseUrl
 
         buildConfigField("String", "DEEPSEEK_API_KEY", deepSeekApiKey.asBuildConfigString())
         buildConfigField("String", "DEEPSEEK_BASE_URL", deepSeekBaseUrl.asBuildConfigString())
+        buildConfigField("String", "OLLAMA_BASE_URL", ollamaBaseUrl.asBuildConfigString())
         buildConfigField("String", "MCP_BASE_URL", mcpBaseUrl.asBuildConfigString())
         buildConfigField("String", "MCP_CURRENCY_BASE_URL", mcpCurrencyBaseUrl.asBuildConfigString())
         buildConfigField("String", "MCP_PIPELINE_BASE_URL", mcpPipelineBaseUrl.asBuildConfigString())

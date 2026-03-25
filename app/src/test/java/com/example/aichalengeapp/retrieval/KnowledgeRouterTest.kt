@@ -8,37 +8,47 @@ class KnowledgeRouterTest {
     private val router = KnowledgeRouter()
 
     @Test
-    fun `matches english project knowledge question`() {
-        assertTrue(router.shouldRetrieve("How does MCP connection work in this project?"))
+    fun `does not match self introduction question`() {
+        assertFalse(router.shouldRetrieve("Who are you?"))
     }
 
     @Test
-    fun `matches russian project knowledge question`() {
-        assertTrue(router.shouldRetrieve("Где хранится логика профиля?"))
+    fun `does not match capability question`() {
+        assertFalse(router.shouldRetrieve("What can you do?"))
     }
 
     @Test
-    fun `matches code entity question for orchestrator`() {
-        assertTrue(router.shouldRetrieve("Где реализован orchestrator?"))
+    fun `does not match greeting`() {
+        assertFalse(router.shouldRetrieve("Hello"))
+    }
+
+    @Test
+    fun `does not match general knowledge question`() {
+        assertFalse(router.shouldRetrieve("What is Android?"))
+    }
+
+    @Test
+    fun `matches chat agent question`() {
+        assertTrue(router.shouldRetrieve("How does ChatAgent process messages?"))
+    }
+
+    @Test
+    fun `matches viewmodel question`() {
+        assertTrue(router.shouldRetrieve("Where is ViewModel state updated?"))
+    }
+
+    @Test
+    fun `matches mcp client manager question`() {
+        assertTrue(router.shouldRetrieve("What does McpClientManager do?"))
     }
 
     @Test
     fun `matches document retriever question`() {
-        assertTrue(router.shouldRetrieve("Где находится DocumentRetriever?"))
-    }
-
-    @Test
-    fun `matches cosine similarity question`() {
-        assertTrue(router.shouldRetrieve("Как считается cosine similarity?"))
+        assertTrue(router.shouldRetrieve("How does DocumentRetriever find relevant chunks?"))
     }
 
     @Test
     fun `does not match currency request`() {
         assertFalse(router.shouldRetrieve("Сколько будет 100 EUR в USD?"))
-    }
-
-    @Test
-    fun `does not match casual chat`() {
-        assertFalse(router.shouldRetrieve("Привет, как дела?"))
     }
 }

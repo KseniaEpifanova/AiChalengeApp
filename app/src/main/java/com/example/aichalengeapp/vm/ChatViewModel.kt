@@ -20,6 +20,8 @@ import com.example.aichalengeapp.data.AgentMessage
 import com.example.aichalengeapp.data.AgentRole
 import com.example.aichalengeapp.debug.TaskTrace
 import com.example.aichalengeapp.mcp.McpTrace
+import com.example.aichalengeapp.repo.LlmProvider
+import com.example.aichalengeapp.repo.LlmSettingsStore
 import com.example.aichalengeapp.retrieval.RetrievalMode
 import com.example.aichalengeapp.ui.isTaskPanelVisible
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -35,7 +37,8 @@ import javax.inject.Inject
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
-    private val agent: ChatAgent
+    private val agent: ChatAgent,
+    private val llmSettingsStore: LlmSettingsStore
 ) : ViewModel() {
     private companion object {
         private const val TAG = "TaskNextAction"
@@ -84,6 +87,12 @@ class ChatViewModel @Inject constructor(
 
     private val _retrievalMode = MutableStateFlow(RetrievalMode.BASELINE)
     val retrievalMode: StateFlow<RetrievalMode> = _retrievalMode.asStateFlow()
+
+    private val _llmProvider = MutableStateFlow(LlmProvider.REMOTE)
+    val llmProvider: StateFlow<LlmProvider> = _llmProvider.asStateFlow()
+
+    private val _localLlmBaseUrl = MutableStateFlow("")
+    val localLlmBaseUrl: StateFlow<String> = _localLlmBaseUrl.asStateFlow()
 
     private val _factsJson = MutableStateFlow("")
     val factsJson: StateFlow<String> = _factsJson.asStateFlow()
@@ -143,6 +152,11 @@ class ChatViewModel @Inject constructor(
             _invariantsProfile.value = agentIo { getInvariants() }
             _invariantsDirty.value = false
             _guardActive.value = !_invariantsProfile.value.isEmpty()
+
+            val llmSettings = llmSettingsStore.load()
+            _llmProvider.value = llmSettings.provider
+            _localLlmBaseUrl.value = llmSettings.localBaseUrl
+            McpTrace.d("event" to "llm_provider_selected", "provider" to llmSettings.provider.name)
 
             applyTaskState(agentIo { getTaskState() })
         }
@@ -337,6 +351,21 @@ class ChatViewModel @Inject constructor(
         McpTrace.d("event" to "retrieval_mode_ui_click", "selected" to mode.name)
         _retrievalMode.value = mode
         McpTrace.d("event" to "retrieval_mode_selected", "mode" to mode.name)
+    }
+
+    fun setLlmProvider(provider: LlmProvider) {
+        viewModelScope.launch {
+            llmSettingsStore.saveProvider(provider)
+            _llmProvider.value = provider
+            McpTrace.d("event" to "llm_provider_selected", "provider" to provider.name)
+        }
+    }
+
+    fun setLocalLlmBaseUrl(baseUrl: String) {
+        _localLlmBaseUrl.value = baseUrl
+        viewModelScope.launch {
+            llmSettingsStore.saveLocalBaseUrl(baseUrl)
+        }
     }
 
     fun send(text: String) {
@@ -554,6 +583,10 @@ class ChatViewModel @Inject constructor(
             _strategy.value = StrategyUiState()
             _ragEnabled.value = true
             _retrievalMode.value = RetrievalMode.BASELINE
+            llmSettingsStore.clear()
+            val llmSettings = llmSettingsStore.load()
+            _llmProvider.value = llmSettings.provider
+            _localLlmBaseUrl.value = llmSettings.localBaseUrl
             _factsJson.value = ""
             _workingJson.value = ""
             _longTermJson.value = ""

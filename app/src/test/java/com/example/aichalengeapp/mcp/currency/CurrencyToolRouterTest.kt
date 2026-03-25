@@ -45,6 +45,18 @@ class CurrencyToolRouterTest {
     }
 
     @Test
+    fun `does not match ordinary english phrase`() {
+        val intent = router.route("who are you")
+        assertNull(intent)
+    }
+
+    @Test
+    fun `does not match ordinary english phrase with three letter words`() {
+        val intent = router.route("how are you")
+        assertNull(intent)
+    }
+
+    @Test
     fun `matches russian summary request`() {
         val intent = router.route("Покажи сводку по EUR USD")
         assertNotNull(intent)

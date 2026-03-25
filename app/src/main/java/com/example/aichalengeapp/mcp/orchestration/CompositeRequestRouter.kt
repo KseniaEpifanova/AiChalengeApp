@@ -11,16 +11,6 @@ class CompositeRequestRouter @Inject constructor(
     private val pipelineToolRouter: PipelineToolRouter,
     private val currencyToolRouter: CurrencyToolRouter
 ) {
-    private val currencySignals = listOf(
-        "курс",
-        "валют",
-        "convert",
-        "rate",
-        "сколько будет",
-        "обмен",
-        "exchange"
-    )
-
     fun route(message: String): OrchestrationRoute {
         val normalized = message.trim()
         if (normalized.isEmpty()) return OrchestrationRoute.None
@@ -48,10 +38,7 @@ class CompositeRequestRouter @Inject constructor(
     }
 
     private fun extractCurrencyIntent(message: String) = candidateCurrencySegments(message)
-        .firstNotNullOfOrNull { segment ->
-            if (!looksLikeCurrencySegment(segment)) return@firstNotNullOfOrNull null
-            currencyToolRouter.route(segment)
-        }
+        .firstNotNullOfOrNull(currencyToolRouter::route)
 
     private fun candidateCurrencySegments(message: String): List<String> {
         val separators = listOf("а потом", "потом", "then", "and then")
@@ -59,12 +46,5 @@ class CompositeRequestRouter @Inject constructor(
             message.split(separator, limit = 2, ignoreCase = true).getOrNull(1)?.trim()
         }
         return listOfNotNull(splitSegment, message.trim())
-    }
-
-    private fun looksLikeCurrencySegment(segment: String): Boolean {
-        val lower = segment.lowercase()
-        val hasSignal = currencySignals.any { lower.contains(it) }
-        val hasAmountAndCodes = Regex("""(?iu)\d+(?:[.,]\d+)?\s+[A-Za-z]{3}\b.*\b(?:to|в|к)\s+[A-Za-z]{3}\b""").containsMatchIn(segment)
-        return hasSignal || hasAmountAndCodes
     }
 }

@@ -3,7 +3,6 @@ package com.example.aichalengeapp.agent.orchestrator
 import com.example.aichalengeapp.agent.profile.AssistantProfile
 import com.example.aichalengeapp.agent.profile.ComplexitySensitivity
 import com.example.aichalengeapp.agent.profile.PlanningProfile
-import com.example.aichalengeapp.agent.profile.ResponseProfile
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -11,128 +10,73 @@ class RequestClassifierTest {
 
     private val classifier = RequestClassifier()
 
-    private fun mobileDeveloper(
-        sensitivity: ComplexitySensitivity = ComplexitySensitivity.HIGH,
-        autoDetect: Boolean = true
-    ): AssistantProfile {
-        return AssistantProfile.mobileDeveloper().copy(
-            planningProfile = AssistantProfile.mobileDeveloper().planningProfile.copy(
-                autoDetectComplexity = autoDetect,
-                complexitySensitivity = sensitivity
-            )
-        )
-    }
-
-    private fun casualProfile(
+    private fun profile(
         sensitivity: ComplexitySensitivity = ComplexitySensitivity.MEDIUM,
         autoDetect: Boolean = true
     ): AssistantProfile {
-        return AssistantProfile(
-            id = "casual_user",
-            name = "Casual User",
-            responseProfile = ResponseProfile(
-                style = "Friendly",
-                format = "Short",
-                constraints = "Brief answers"
-            ),
+        return AssistantProfile.mobileDeveloper().copy(
             planningProfile = PlanningProfile(
                 autoDetectComplexity = autoDetect,
                 complexitySensitivity = sensitivity,
-                requirePlanApproval = false,
+                requirePlanApproval = true,
                 allowAutoContinueExecution = false,
-                requireValidationBeforeDone = false
+                requireValidationBeforeDone = true
             )
         )
     }
 
     @Test
-    fun `quick question is simple for mobile developer high`() {
-        val decision = classifier.classifyForProfile("Который сейчас час?", mobileDeveloper())
+    fun `greeting is simple`() {
+        val decision = classifier.classifyForProfile("привет", profile())
         assertEquals(RequestKind.SIMPLE, decision.kind)
     }
 
     @Test
-    fun `russian design request is complex for mobile developer high`() {
-        val decision = classifier.classifyForProfile("спроектируй экран списка фильмов", mobileDeveloper())
-        assertEquals(RequestKind.COMPLEX, decision.kind)
-    }
-
-    @Test
-    fun `help design variant is also complex for mobile developer high`() {
-        val decision = classifier.classifyForProfile("Помоги спроектировать экран списка фильмов", mobileDeveloper())
-        assertEquals(RequestKind.COMPLEX, decision.kind)
-    }
-
-    @Test
-    fun `how to make screen with search is complex for mobile developer`() {
-        val decision = classifier.classifyForProfile("Как сделать экран списка фильмов с поиском", mobileDeveloper())
-        assertEquals(RequestKind.COMPLEX, decision.kind)
-    }
-
-    @Test
-    fun `screen with search and filters is complex for mobile developer high`() {
-        val decision = classifier.classifyForProfile("Сделай экран списка фильмов с поиском и фильтрами", mobileDeveloper())
-        assertEquals(RequestKind.COMPLEX, decision.kind)
-    }
-
-    @Test
-    fun `help build screen is complex for low sensitivity with detailed profile bias`() {
-        val decision = classifier.classifyForProfile(
-            "Помоги сделать экран",
-            mobileDeveloper(sensitivity = ComplexitySensitivity.LOW)
-        )
-        assertEquals(RequestKind.COMPLEX, decision.kind)
-    }
-
-    @Test
-    fun `casual profile can classify same message as simple`() {
-        val decision = classifier.classifyForProfile(
-            "Помоги спроектировать экран",
-            casualProfile(sensitivity = ComplexitySensitivity.LOW)
-        )
+    fun `identity question is simple`() {
+        val decision = classifier.classifyForProfile("Кто ты?", profile())
         assertEquals(RequestKind.SIMPLE, decision.kind)
     }
 
     @Test
-    fun `exploration request stays simple for mobile developer high`() {
-        val decision = classifier.classifyForProfile(
-            "Я хочу понять, как в проекте устроен чат. Начни с общего обзора ChatAgent и ViewModel.",
-            mobileDeveloper()
-        )
+    fun `explanatory request is simple`() {
+        val decision = classifier.classifyForProfile("How does ChatAgent work?", profile())
         assertEquals(RequestKind.SIMPLE, decision.kind)
     }
 
     @Test
-    fun `explanation request about retriever stays simple`() {
-        val decision = classifier.classifyForProfile(
-            "Расскажи, как работает DocumentRetriever.",
-            mobileDeveloper()
-        )
+    fun `exploration request is simple`() {
+        val decision = classifier.classifyForProfile("Я хочу понять, как устроен чат", profile())
         assertEquals(RequestKind.SIMPLE, decision.kind)
     }
 
     @Test
-    fun `explicit implementation request remains complex`() {
-        val decision = classifier.classifyForProfile(
-            "Реализуй reranker после retrieval.",
-            mobileDeveloper()
-        )
+    fun `execution request is complex`() {
+        val decision = classifier.classifyForProfile("Исправь баг", profile())
         assertEquals(RequestKind.COMPLEX, decision.kind)
     }
 
     @Test
-    fun `auto detect disabled keeps complex request simple`() {
-        val decision = classifier.classifyForProfile(
-            "Design and implement screen flow with state and navigation",
-            mobileDeveloper(autoDetect = false)
-        )
+    fun `english execution request is complex`() {
+        val decision = classifier.classifyForProfile("Implement reranker", profile())
+        assertEquals(RequestKind.COMPLEX, decision.kind)
+    }
+
+    @Test
+    fun `simple message without execution evidence stays simple`() {
+        val decision = classifier.classifyForProfile("Что ты умеешь?", profile())
         assertEquals(RequestKind.SIMPLE, decision.kind)
     }
 
     @Test
-    fun `legacy classify api remains compatible`() {
+    fun `auto detect disabled keeps execution request simple`() {
+        val decision = classifier.classifyForProfile("Fix bug in task trigger", profile(autoDetect = false))
+        assertEquals(RequestKind.SIMPLE, decision.kind)
+    }
+
+    @Test
+    fun `legacy classify api remains compatible for explicit execution`() {
         val kind = classifier.classify(
-            message = "Design login screen architecture",
+            message = "Build settings screen",
             planningProfile = PlanningProfile(complexitySensitivity = ComplexitySensitivity.MEDIUM)
         )
         assertEquals(RequestKind.COMPLEX, kind)

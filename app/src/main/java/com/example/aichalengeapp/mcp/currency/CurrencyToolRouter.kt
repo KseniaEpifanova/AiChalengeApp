@@ -8,28 +8,10 @@ import javax.inject.Singleton
 class CurrencyToolRouter @Inject constructor(
     private val parser: CurrencyRequestParser
 ) {
-    private val currencySignals = listOf(
-        "курс",
-        "валют",
-        "convert",
-        "rate",
-        "сколько будет",
-        "обмен",
-        "exchange"
-    )
-
     fun route(message: String): CurrencyToolIntent? {
         val normalized = message.trim()
         if (normalized.isEmpty()) {
             McpTrace.d("event" to "currency_router_no_match", "reason" to "empty_message")
-            return null
-        }
-
-        val hasSignal = currencySignals.any { normalized.contains(it, ignoreCase = true) } ||
-            Regex("""(?iu).*\b[A-Za-z]{3}\b.*\b[A-Za-z]{3}\b.*""").matches(normalized)
-
-        if (!hasSignal) {
-            McpTrace.d("event" to "currency_router_no_match", "reason" to "no_currency_signal", "message" to normalized)
             return null
         }
 
