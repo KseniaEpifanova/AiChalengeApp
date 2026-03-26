@@ -45,6 +45,8 @@ import com.example.aichalengeapp.retrieval.RetrievalMode
 import com.example.aichalengeapp.retrieval.RetrievalPromptBuilder
 import com.example.aichalengeapp.retrieval.RetrievedChunk
 import com.example.aichalengeapp.repo.ChatRepository
+import com.example.aichalengeapp.repo.LlmProvider
+import com.example.aichalengeapp.repo.LlmSettingsStore
 import android.util.Log
 import dagger.hilt.android.scopes.ViewModelScoped
 import kotlinx.coroutines.sync.Mutex
@@ -78,12 +80,19 @@ class ChatAgent @Inject constructor(
     private val mcpCurrencyService: McpCurrencyService,
     private val knowledgeRouter: KnowledgeRouter,
     private val documentRetriever: DocumentRetriever,
-    private val retrievalPromptBuilder: RetrievalPromptBuilder
+    private val retrievalPromptBuilder: RetrievalPromptBuilder,
+    private val llmSettingsStore: LlmSettingsStore
 ) {
     private companion object {
         private const val TAG = "TaskClassifier"
         private const val MAX_HISTORY_MESSAGES = 6
         private const val MIN_GROUNDED_RETRIEVAL_SCORE = 0.20
+        private const val LOCAL_RAG_CHUNK_LIMIT = 2
+        private const val LOCAL_MAX_HISTORY_MESSAGES = 4
+        private const val LOCAL_MAX_OUTPUT_TOKENS = 320
+        private const val LOCAL_MAX_QUOTES = 2
+        private const val LOCAL_QUOTE_MAX_LENGTH = 80
+        private const val LOCAL_EXCERPT_MAX_LENGTH = 240
     }
 
     private val mutex = Mutex()
@@ -647,6 +656,7 @@ class ChatAgent @Inject constructor(
 
         val strategy = selector.select(strategyConfig)
         val plan = strategy.build(shortTerm, strategyConfig)
+        val llmProvider = llmSettingsStore.load().provider
         com.example.aichalengeapp.mcp.McpTrace.d(
             "event" to "rag_mode_selected",
             "enabled" to ragEnabled,
@@ -673,7 +683,15 @@ class ChatAgent @Inject constructor(
                     val retrievedChunks = documentRetriever.retrieve(trimmed, retrievalMode)
                     val topChunk = retrievedChunks.firstOrNull()
                     val topRetrievedScore = retrievedChunks.maxOfOrNull { it.finalScore }
-                    val hasGroundingEvidence = topChunk?.let { hasGroundingEvidence(trimmed, it) } ?: false
+                    val groundingEvidence = topChunk?.let {
+                        com.example.aichalengeapp.retrieval.CodeEntityMatchScorer.evaluate(
+                            query = trimmed,
+                            titleOrFile = it.titleOrFile,
+                            section = it.section,
+                            text = it.text
+                        )
+                    }
+                    val hasGroundingEvidence = groundingEvidence?.hasGroundingEvidence ?: false
                     val noKnowledgeMode = retrievedChunks.isEmpty() ||
                         (topRetrievedScore != null && topRetrievedScore < MIN_GROUNDED_RETRIEVAL_SCORE) ||
                         !hasGroundingEvidence
@@ -683,6 +701,7 @@ class ChatAgent @Inject constructor(
                         "chunks" to retrievedChunks.size,
                         "topScore" to topRetrievedScore,
                         "groundingEvidence" to hasGroundingEvidence,
+                        "groundingReasons" to groundingEvidence?.reasons?.joinToString(","),
                         "noKnowledgeMode" to noKnowledgeMode,
                         "retrievalMode" to retrievalMode
                     )
@@ -700,24 +719,39 @@ class ChatAgent @Inject constructor(
                             "topScore" to topRetrievedScore,
                             "retrievalMode" to retrievalMode
                         )
-                        retrievalPromptBuilder.buildNoKnowledgePrompt(trimmed)
+                        com.example.aichalengeapp.mcp.McpTrace.d(
+                            "event" to "retrieval_prompt_skipped_due_to_low_grounding",
+                            "message" to trimmed,
+                            "chunks" to retrievedChunks.size,
+                            "topScore" to topRetrievedScore,
+                            "groundingEvidence" to hasGroundingEvidence,
+                            "groundingReasons" to groundingEvidence?.reasons?.joinToString(",")
+                        )
+                        null
                     } else if (retrievedChunks.isNotEmpty()) {
+                        val retrievalChunksForPrompt = limitRetrievedChunksForProvider(
+                            chunks = retrievedChunks,
+                            provider = llmProvider,
+                            message = trimmed
+                        )
+                        val retrievalPromptOptions = retrievalPromptOptionsForProvider(llmProvider)
                         com.example.aichalengeapp.mcp.McpTrace.d(
                             "event" to "answer_sources_required",
                             "message" to trimmed,
-                            "chunks" to retrievedChunks.size
+                            "chunks" to retrievalChunksForPrompt.size
                         )
                         com.example.aichalengeapp.mcp.McpTrace.d(
                             "event" to "answer_quotes_required",
                             "message" to trimmed,
-                            "chunks" to retrievedChunks.size
+                            "chunks" to retrievalChunksForPrompt.size
                         )
                         com.example.aichalengeapp.mcp.McpTrace.d(
                             "event" to "rag_enabled_prompt_built",
                             "message" to trimmed,
-                            "chunks" to retrievedChunks.size
+                            "chunks" to retrievalChunksForPrompt.size,
+                            "provider" to llmProvider.name
                         )
-                        retrievalPromptBuilder.build(trimmed, retrievedChunks)
+                        retrievalPromptBuilder.build(trimmed, retrievalChunksForPrompt, retrievalPromptOptions)
                     } else {
                         null
                     }
@@ -791,9 +825,10 @@ class ChatAgent @Inject constructor(
         )
 
         val planSystemMessages = plan.messagesForLlm.filter { it.role == AgentRole.SYSTEM }
+        val historyLimit = historyLimitForProvider(llmProvider)
         val planHistoryMessages = plan.messagesForLlm
             .filter { it.role != AgentRole.SYSTEM }
-            .takeLast(MAX_HISTORY_MESSAGES)
+            .takeLast(historyLimit)
         val llmMessages = buildList {
             if (!retrievalContext.isNullOrBlank()) {
                 add(AgentMessage(AgentRole.SYSTEM, retrievalContext))
@@ -829,14 +864,28 @@ class ChatAgent @Inject constructor(
             "roles" to llmMessages.joinToString(separator = ",") { it.role.name },
             "lastUser" to llmMessages.lastOrNull { it.role == AgentRole.USER }?.content,
             "retrievalSystemPromptPresent" to !retrievalContext.isNullOrBlank(),
-            "lastSystemIsProfile" to (llmMessages.lastOrNull { it.role == AgentRole.SYSTEM }?.content == profileSystemPrompt)
+            "lastSystemIsProfile" to (llmMessages.lastOrNull { it.role == AgentRole.SYSTEM }?.content == profileSystemPrompt),
+            "provider" to llmProvider.name,
+            "historyMessages" to planHistoryMessages.size
         )
 
         val estimatedPrompt = tokenEstimator.estimateTokens(llmMessages)
         val estimatedUser = tokenEstimator.estimateTokens(trimmed)
         val estimatedHistory = (estimatedPrompt - estimatedUser).coerceAtLeast(0)
 
-        val result = llmRepository.ask(llmMessages, maxOutputTokens = maxOutputTokens)
+        val outputTokensForRequest = maxOutputTokensForProvider(llmProvider)
+        if (llmProvider == LlmProvider.LOCAL) {
+            com.example.aichalengeapp.mcp.McpTrace.d(
+                "event" to "local_compact_mode_applied",
+                "provider" to llmProvider.name,
+                "finalChunks" to extractRetrievalChunkCount(retrievalContext),
+                "finalHistoryMessages" to planHistoryMessages.size,
+                "maxOutputTokens" to outputTokensForRequest,
+                "maxSources" to LOCAL_RAG_CHUNK_LIMIT,
+                "maxQuotes" to LOCAL_MAX_QUOTES
+            )
+        }
+        val result = llmRepository.ask(llmMessages, maxOutputTokens = outputTokensForRequest)
         val rawAnswer = result.text
         TaskTrace.d(
             "event" to "llm_response",
@@ -1034,6 +1083,51 @@ class ChatAgent @Inject constructor(
 
     private fun ResponseProfile.toUserProfile(): UserProfile {
         return UserProfile(style = style, format = format, constraints = constraints)
+    }
+
+    private fun limitRetrievedChunksForProvider(
+        chunks: List<RetrievedChunk>,
+        provider: LlmProvider,
+        message: String
+    ): List<RetrievedChunk> {
+        if (provider != LlmProvider.LOCAL) return chunks
+
+        val limited = chunks.take(LOCAL_RAG_CHUNK_LIMIT)
+        if (limited.size != chunks.size) {
+            com.example.aichalengeapp.mcp.McpTrace.d(
+                "event" to "rag_chunk_limit_applied",
+                "provider" to provider.name,
+                "message" to message,
+                "requestedChunks" to chunks.size,
+                "finalChunks" to limited.size
+            )
+        }
+        return limited
+    }
+
+    private fun historyLimitForProvider(provider: LlmProvider): Int {
+        return if (provider == LlmProvider.LOCAL) LOCAL_MAX_HISTORY_MESSAGES else MAX_HISTORY_MESSAGES
+    }
+
+    private fun maxOutputTokensForProvider(provider: LlmProvider): Int {
+        return if (provider == LlmProvider.LOCAL) LOCAL_MAX_OUTPUT_TOKENS else maxOutputTokens
+    }
+
+    private fun retrievalPromptOptionsForProvider(provider: LlmProvider): RetrievalPromptBuilder.PromptOptions {
+        return if (provider == LlmProvider.LOCAL) {
+            RetrievalPromptBuilder.PromptOptions(
+                compactMode = true,
+                maxQuotes = LOCAL_MAX_QUOTES,
+                quoteMaxLength = LOCAL_QUOTE_MAX_LENGTH,
+                excerptMaxLength = LOCAL_EXCERPT_MAX_LENGTH
+            )
+        } else {
+            RetrievalPromptBuilder.PromptOptions()
+        }
+    }
+
+    private fun extractRetrievalChunkCount(retrievalContext: String?): Int {
+        return Regex("""CHUNK_ID:""").findAll(retrievalContext.orEmpty()).count()
     }
 
     private sealed class IntentActionResult {
@@ -1295,31 +1389,6 @@ class ChatAgent @Inject constructor(
             value.toLong().toString()
         } else {
             String.format(Locale.US, "%.4f", value).trimEnd('0').trimEnd('.')
-        }
-    }
-
-    private fun hasGroundingEvidence(question: String, chunk: RetrievedChunk): Boolean {
-        val title = chunk.titleOrFile.lowercase()
-        val section = chunk.section.orEmpty().lowercase()
-        val text = chunk.text.lowercase()
-        val queryTerms = question.lowercase()
-            .split(Regex("""[^\p{L}\p{N}_]+"""))
-            .filter { it.length >= 3 }
-        val codeTerms = Regex("""[A-Za-z_][A-Za-z0-9_]{2,}""")
-            .findAll(question)
-            .map { it.value.lowercase() }
-            .distinct()
-            .toList()
-
-        if (queryTerms.any { title.contains(it) || section.contains(it) }) {
-            return true
-        }
-
-        return codeTerms.any { term ->
-            title.contains(term) ||
-                section.contains(term) ||
-                Regex("""\b(class|object|interface|data\s+class)\s+${Regex.escape(term)}\b""").containsMatchIn(text) ||
-                Regex("""\bfun\s+${Regex.escape(term)}\b""").containsMatchIn(text)
         }
     }
 

@@ -21,6 +21,10 @@ class DocumentRetrieverImpl @Inject constructor(
     private val retrievalFilter: RetrievalFilter,
     private val retrievalReranker: RetrievalReranker
 ) : DocumentRetriever {
+    private companion object {
+        private const val PRESELECT_BOOST_FACTOR = 0.65
+    }
+
     override suspend fun retrieve(query: String, mode: RetrievalMode): List<RetrievedChunk> {
         val config = RetrievalConfig.forMode(mode)
         val rewrittenQuery = queryRewriter.rewrite(query, enabled = config.rewriteEnabled)
@@ -88,6 +92,12 @@ class DocumentRetrieverImpl @Inject constructor(
                     } else {
                         val scored = candidates.map { candidate ->
                             val similarity = CosineSimilarity.compute(queryEmbedding, candidate.embedding)
+                            val entityEvidence = CodeEntityMatchScorer.evaluate(
+                                query = rewrittenQuery,
+                                titleOrFile = candidate.titleOrFile,
+                                section = candidate.section,
+                                text = candidate.text
+                            )
                             RetrievedChunk(
                                 source = candidate.source,
                                 titleOrFile = candidate.titleOrFile,
@@ -95,10 +105,12 @@ class DocumentRetrieverImpl @Inject constructor(
                                 chunkId = candidate.chunkId,
                                 strategy = candidate.strategy,
                                 text = candidate.text,
-                                similarity = similarity
+                                similarity = similarity,
+                                finalScore = similarity + (entityEvidence.boost * PRESELECT_BOOST_FACTOR),
+                                boostReasons = entityEvidence.reasons
                             )
                         }
-                            .sortedByDescending { it.similarity }
+                            .sortedByDescending { it.finalScore }
 
                         val topBefore = scored.take(config.topKBefore)
                         val topCandidate = topBefore.firstOrNull()
