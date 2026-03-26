@@ -47,6 +47,9 @@ import com.example.aichalengeapp.retrieval.RetrievalMode
 import com.example.aichalengeapp.retrieval.RetrievalPromptBuilder
 import com.example.aichalengeapp.retrieval.RetrievedChunk
 import com.example.aichalengeapp.repo.ChatRepository
+import com.example.aichalengeapp.repo.LlmProvider
+import com.example.aichalengeapp.repo.LlmSettings
+import com.example.aichalengeapp.repo.LlmSettingsStore
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
@@ -255,6 +258,157 @@ class ChatAgentTest {
     }
 
     @Test
+    fun `weak retrieval does not inject retrieval prompt when grounding is low`() = runSuspending {
+        val fixture = fixture(
+            llmText = "Fallback LLM answer",
+            documentRetriever = object : DocumentRetriever {
+                override suspend fun retrieve(query: String, mode: RetrievalMode): List<RetrievedChunk> {
+                    return listOf(
+                        RetrievedChunk(
+                            source = "android-app",
+                            titleOrFile = "McpClientManager.kt",
+                            section = "connect",
+                            chunkId = "mcp-connect-1",
+                            strategy = "semantic",
+                            text = "McpClientManager handles initialize, session tracking, tools/list and tools/call over HTTP MCP.",
+                            similarity = 0.29,
+                            finalScore = 0.29
+                        )
+                    )
+                }
+            }
+        )
+        fixture.agent.init()
+
+        val reply = fixture.agent.handleUserMessage("How does ChatAgent process messages?", StrategyConfig.SlidingWindow())
+
+        val systemMessages = fixture.repo.lastMessages.filter { it.role == com.example.aichalengeapp.data.AgentRole.SYSTEM }
+        assertEquals("Fallback LLM answer", reply.text)
+        assertTrue(systemMessages.none { it.content.contains("RETRIEVED PROJECT KNOWLEDGE") })
+        assertTrue(systemMessages.none { it.content.contains("I don't know based on the retrieved context.") })
+    }
+
+    @Test
+    fun `grounded retrieval injects retrieval prompt for chat agent query`() = runSuspending {
+        val fixture = fixture(
+            llmText = "Grounded answer",
+            documentRetriever = object : DocumentRetriever {
+                override suspend fun retrieve(query: String, mode: RetrievalMode): List<RetrievedChunk> {
+                    return listOf(
+                        RetrievedChunk(
+                            source = "android-app",
+                            titleOrFile = "ChatAgent.kt",
+                            section = "handleUserMessage",
+                            chunkId = "chat-agent-1",
+                            strategy = "semantic",
+                            text = "class ChatAgent handles user messages, routing, retrieval gating, and final llm request assembly.",
+                            similarity = 0.42,
+                            finalScore = 1.07
+                        ),
+                        RetrievedChunk(
+                            source = "android-app",
+                            titleOrFile = "McpClientManager.kt",
+                            section = "connect",
+                            chunkId = "mcp-connect-1",
+                            strategy = "semantic",
+                            text = "class McpClientManager handles initialize and session tracking.",
+                            similarity = 0.44,
+                            finalScore = 0.34
+                        )
+                    )
+                }
+            }
+        )
+        fixture.agent.init()
+
+        fixture.agent.handleUserMessage("How does ChatAgent process messages?", StrategyConfig.SlidingWindow())
+
+        val systemMessages = fixture.repo.lastMessages.filter { it.role == com.example.aichalengeapp.data.AgentRole.SYSTEM }
+        assertTrue(systemMessages.any { it.content.contains("RETRIEVED PROJECT KNOWLEDGE") })
+        assertTrue(systemMessages.any { it.content.contains("ChatAgent.kt") })
+    }
+
+    @Test
+    fun `local provider limits retrieval prompt to top two chunks`() = runSuspending {
+        val fixture = fixture(
+            llmText = "Grounded answer",
+            llmProvider = LlmProvider.LOCAL,
+            documentRetriever = threeChunkRetriever()
+        )
+        fixture.agent.init()
+
+        fixture.agent.handleUserMessage("How does ChatAgent process messages?", StrategyConfig.SlidingWindow())
+
+        val retrievalPrompt = fixture.repo.lastMessages
+            .firstOrNull { it.role == com.example.aichalengeapp.data.AgentRole.SYSTEM && it.content.contains("RETRIEVED PROJECT KNOWLEDGE") }
+            ?.content
+            .orEmpty()
+        assertTrue(retrievalPrompt.contains("Sources:"))
+        assertTrue(retrievalPrompt.contains("Quotes:"))
+        assertTrue(retrievalPrompt.contains("CHUNK_ID: chat-agent-1"))
+        assertTrue(retrievalPrompt.contains("CHUNK_ID: chat-agent-2"))
+        assertTrue(retrievalPrompt.contains("SOURCE: android-app"))
+        assertTrue(retrievalPrompt.contains("QUOTE_SNIPPET:"))
+        assertTrue(!retrievalPrompt.contains("CHUNK_ID: chat-agent-3"))
+        assertTrue(retrievalPrompt.contains("EXCERPT:"))
+        assertTrue(!retrievalPrompt.contains("\nTEXT:\n"))
+    }
+
+    @Test
+    fun `remote provider preserves all retrieved chunks in prompt`() = runSuspending {
+        val fixture = fixture(
+            llmText = "Grounded answer",
+            llmProvider = LlmProvider.REMOTE,
+            documentRetriever = threeChunkRetriever()
+        )
+        fixture.agent.init()
+
+        fixture.agent.handleUserMessage("How does ChatAgent process messages?", StrategyConfig.SlidingWindow())
+
+        val retrievalPrompt = fixture.repo.lastMessages
+            .firstOrNull { it.role == com.example.aichalengeapp.data.AgentRole.SYSTEM && it.content.contains("RETRIEVED PROJECT KNOWLEDGE") }
+            ?.content
+            .orEmpty()
+        assertTrue(retrievalPrompt.contains("CHUNK_ID: chat-agent-1"))
+        assertTrue(retrievalPrompt.contains("CHUNK_ID: chat-agent-2"))
+        assertTrue(retrievalPrompt.contains("CHUNK_ID: chat-agent-3"))
+        assertTrue(retrievalPrompt.contains("\nTEXT:\n"))
+    }
+
+    @Test
+    fun `local provider uses reduced history window and output tokens`() = runSuspending {
+        val fixture = fixture(
+            llmText = "Compact local answer",
+            llmProvider = LlmProvider.LOCAL,
+            documentRetriever = threeChunkRetriever()
+        )
+        fixture.agent.init()
+
+        fixture.agent.handleUserMessage("First question about ChatAgent", StrategyConfig.SlidingWindow())
+        fixture.agent.handleUserMessage("Second question about ChatAgent", StrategyConfig.SlidingWindow())
+        fixture.agent.handleUserMessage("Third question about ChatAgent", StrategyConfig.SlidingWindow())
+        fixture.agent.handleUserMessage("How does ChatAgent process messages?", StrategyConfig.SlidingWindow())
+
+        val nonSystemMessages = fixture.repo.lastMessages.filter { it.role != com.example.aichalengeapp.data.AgentRole.SYSTEM }
+        assertTrue(nonSystemMessages.size <= 4)
+        assertEquals(320, fixture.repo.lastMaxOutputTokens)
+    }
+
+    @Test
+    fun `remote provider keeps existing output token cap`() = runSuspending {
+        val fixture = fixture(
+            llmText = "Remote answer",
+            llmProvider = LlmProvider.REMOTE,
+            documentRetriever = threeChunkRetriever()
+        )
+        fixture.agent.init()
+
+        fixture.agent.handleUserMessage("How does ChatAgent process messages?", StrategyConfig.SlidingWindow())
+
+        assertEquals(1536, fixture.repo.lastMaxOutputTokens)
+    }
+
+    @Test
     fun `knowledge retrieval failure falls back to llm for same message`() = runSuspending {
         val fixture = fixture(
             llmText = "Fallback LLM answer",
@@ -281,7 +435,8 @@ class ChatAgentTest {
     private fun fixture(
         llmText: String,
         classifierMap: Map<String, String> = emptyMap(),
-        documentRetriever: DocumentRetriever? = null
+        documentRetriever: DocumentRetriever? = null,
+        llmProvider: LlmProvider = LlmProvider.REMOTE
     ): Fixture {
         val repo = FakeRepo(llmText, classifierMap)
         val shortTermStore = FakeAgentMemoryStore()
@@ -290,6 +445,12 @@ class ChatAgentTest {
         val userProfileStore = FakeUserProfileStore()
         val profilesStore = FakeProfilesStore()
         val invariantsStore = FakeInvariantsStore()
+        val llmSettingsStore = FakeLlmSettingsStore(
+            LlmSettings(
+                provider = llmProvider,
+                localBaseUrl = "http://10.0.2.2:11434"
+            )
+        )
 
         val selector = ContextStrategySelector(SlidingWindowStrategy(), StickyFactsStrategy(), BranchingStrategy())
         val tokenEstimator = SimpleCharTokenEstimator()
@@ -433,10 +594,50 @@ class ChatAgentTest {
                     }
                 }
             },
-            retrievalPromptBuilder = RetrievalPromptBuilder()
+            retrievalPromptBuilder = RetrievalPromptBuilder(),
+            llmSettingsStore = llmSettingsStore
         )
 
         return Fixture(agent, repo)
+    }
+
+    private fun threeChunkRetriever(): DocumentRetriever {
+        return object : DocumentRetriever {
+            override suspend fun retrieve(query: String, mode: RetrievalMode): List<RetrievedChunk> {
+                return listOf(
+                    RetrievedChunk(
+                        source = "android-app",
+                        titleOrFile = "ChatAgent.kt",
+                        section = "handleUserMessage",
+                        chunkId = "chat-agent-1",
+                        strategy = "semantic",
+                        text = "class ChatAgent handles user messages and builds the final llm request.",
+                        similarity = 0.48,
+                        finalScore = 1.10
+                    ),
+                    RetrievedChunk(
+                        source = "android-app",
+                        titleOrFile = "ChatAgent.kt",
+                        section = "prompt_assembly",
+                        chunkId = "chat-agent-2",
+                        strategy = "semantic",
+                        text = "ChatAgent assembles retrieval, system context, stage notice, and profile prompt.",
+                        similarity = 0.42,
+                        finalScore = 0.96
+                    ),
+                    RetrievedChunk(
+                        source = "android-app",
+                        titleOrFile = "ChatAgent.kt",
+                        section = "response",
+                        chunkId = "chat-agent-3",
+                        strategy = "semantic",
+                        text = "ChatAgent sends the final message list to the llm repository and persists history.",
+                        similarity = 0.38,
+                        finalScore = 0.88
+                    )
+                )
+            }
+        }
     }
 
     private data class Fixture(
@@ -449,9 +650,11 @@ class ChatAgentTest {
         private val classifierMap: Map<String, String>
     ) : ChatRepository {
         var lastMessages: List<AgentMessage> = emptyList()
+        var lastMaxOutputTokens: Int? = null
 
         override suspend fun ask(messages: List<AgentMessage>, maxOutputTokens: Int?): LlmResult {
             lastMessages = messages
+            lastMaxOutputTokens = maxOutputTokens
             val system = messages.firstOrNull { it.role == com.example.aichalengeapp.data.AgentRole.SYSTEM }?.content.orEmpty()
             if (system.contains("strict intent classifier")) {
                 val userPayload = messages.lastOrNull { it.role == com.example.aichalengeapp.data.AgentRole.USER }?.content.orEmpty().lowercase()
@@ -515,6 +718,24 @@ class ChatAgentTest {
 
         override suspend fun clear() {
             profile = UserProfile()
+        }
+    }
+
+    private class FakeLlmSettingsStore(
+        private var settings: LlmSettings
+    ) : LlmSettingsStore {
+        override suspend fun load(): LlmSettings = settings
+
+        override suspend fun saveProvider(provider: LlmProvider) {
+            settings = settings.copy(provider = provider)
+        }
+
+        override suspend fun saveLocalBaseUrl(baseUrl: String) {
+            settings = settings.copy(localBaseUrl = baseUrl)
+        }
+
+        override suspend fun clear() {
+            settings = LlmSettings()
         }
     }
 
