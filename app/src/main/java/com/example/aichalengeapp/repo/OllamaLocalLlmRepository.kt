@@ -1,6 +1,7 @@
 package com.example.aichalengeapp.repo
 
 import com.example.aichalengeapp.BuildConfig
+import com.example.aichalengeapp.data.OllamaOptions
 import com.example.aichalengeapp.data.OllamaRequest
 import com.squareup.moshi.Moshi
 import okhttp3.Interceptor
@@ -43,7 +44,7 @@ class OllamaLocalLlmRepository @Inject constructor(
             .build()
     }
 
-    override suspend fun send(prompt: String): String {
+    override suspend fun send(prompt: String, config: LocalGenerationConfig): String {
         val settings = settingsStore.load()
         val api = Retrofit.Builder()
             .baseUrl(normalizeBaseUrl(settings.localBaseUrl))
@@ -57,7 +58,11 @@ class OllamaLocalLlmRepository @Inject constructor(
                 OllamaRequest(
                     model = settings.localModel,
                     prompt = prompt,
-                    stream = false
+                    stream = false,
+                    options = OllamaOptions(
+                        temperature = config.temperature,
+                        num_predict = config.maxOutputTokens
+                    )
                 )
             )
         } catch (e: UnknownHostException) {
