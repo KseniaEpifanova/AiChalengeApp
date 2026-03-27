@@ -92,7 +92,21 @@ class ChatRepositoryImpl @Inject constructor(
 
     private suspend fun askLocal(messages: List<AgentMessage>): LlmResult {
         val prompt = buildOllamaPrompt(messages)
-        val text = localLlmRepository.send(prompt)
+        val config = buildLocalGenerationConfig(messages)
+        McpTrace.d(
+            "event" to "local_generation_config",
+            "provider" to LlmProvider.LOCAL.name,
+            "temperature" to config.temperature,
+            "maxOutputTokens" to config.maxOutputTokens,
+            "groundedRag" to hasRetrievedGrounding(messages)
+        )
+        McpTrace.d(
+            "event" to "local_prompt_template_applied",
+            "provider" to LlmProvider.LOCAL.name,
+            "template" to "compact_v1",
+            "messages" to messages.size
+        )
+        val text = localLlmRepository.send(prompt, config)
         return LlmResult(text = text, usage = null)
     }
 
@@ -106,14 +120,41 @@ class ChatRepositoryImpl @Inject constructor(
     }
 
     private fun buildOllamaPrompt(messages: List<AgentMessage>): String {
+        val compactPreamble = """
+            S:
+            LOCAL COMPACT MODE
+            - Answer briefly and directly.
+            - If retrieved project context is present, use only it.
+            - Keep sources and quotes compact.
+        """.trimIndent()
         val body = messages.joinToString("\n\n") { message ->
             val role = when (message.role) {
-                AgentRole.SYSTEM -> "SYSTEM"
-                AgentRole.USER -> "USER"
-                AgentRole.ASSISTANT -> "ASSISTANT"
+                AgentRole.SYSTEM -> "S"
+                AgentRole.USER -> "U"
+                AgentRole.ASSISTANT -> "A"
             }
             "$role:\n${message.content.trim()}"
         }
-        return "$body\n\nASSISTANT:\n"
+        return "$compactPreamble\n\n$body\n\nA:\n"
+    }
+
+    private fun buildLocalGenerationConfig(messages: List<AgentMessage>): LocalGenerationConfig {
+        return if (hasRetrievedGrounding(messages)) {
+            LocalGenerationConfig(
+                temperature = 0.1,
+                maxOutputTokens = 320
+            )
+        } else {
+            LocalGenerationConfig(
+                temperature = 0.2,
+                maxOutputTokens = 320
+            )
+        }
+    }
+
+    private fun hasRetrievedGrounding(messages: List<AgentMessage>): Boolean {
+        return messages.any { message ->
+            message.role == AgentRole.SYSTEM && message.content.contains("RETRIEVED PROJECT KNOWLEDGE")
+        }
     }
 }

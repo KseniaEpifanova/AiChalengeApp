@@ -56,9 +56,31 @@ class ChatRepositoryImplTest {
         assertNull(result.usage)
         assertEquals(0, chatApi.chatCalls)
         assertEquals(1, local.calls)
-        assertTrue(local.lastPrompt.contains("SYSTEM:\nsystem prompt"))
-        assertTrue(local.lastPrompt.contains("USER:\nExplain ChatAgent"))
-        assertTrue(local.lastPrompt.endsWith("ASSISTANT:\n"))
+        assertTrue(local.lastPrompt.contains("LOCAL COMPACT MODE"))
+        assertTrue(local.lastPrompt.contains("S:\nsystem prompt"))
+        assertTrue(local.lastPrompt.contains("U:\nExplain ChatAgent"))
+        assertTrue(local.lastPrompt.endsWith("A:\n"))
+        assertEquals(0.2, local.lastConfig?.temperature ?: 0.0, 0.0001)
+        assertEquals(320, local.lastConfig?.maxOutputTokens)
+    }
+
+    @Test
+    fun `local grounded rag uses lower temperature`() = runBlocking {
+        val chatApi = FakeChatApi()
+        val local = FakeLocalLlmRepository(response = "local-answer")
+        val store = FakeLlmSettingsStore(LlmSettings(provider = LlmProvider.LOCAL, localBaseUrl = "http://10.0.2.2:11434"))
+        val repository = ChatRepositoryImpl(chatApi, local, store)
+
+        repository.ask(
+            messages = listOf(
+                AgentMessage(AgentRole.SYSTEM, "RETRIEVED PROJECT KNOWLEDGE\nSOURCE: android-app"),
+                AgentMessage(AgentRole.USER, "How does ChatAgent process messages?")
+            ),
+            maxOutputTokens = 320
+        )
+
+        assertEquals(0.1, local.lastConfig?.temperature ?: 0.0, 0.0001)
+        assertEquals(320, local.lastConfig?.maxOutputTokens)
     }
 
     @Test
@@ -116,10 +138,12 @@ class ChatRepositoryImplTest {
     ) : LocalLlmRepository {
         var calls: Int = 0
         var lastPrompt: String = ""
+        var lastConfig: LocalGenerationConfig? = null
 
-        override suspend fun send(prompt: String): String {
+        override suspend fun send(prompt: String, config: LocalGenerationConfig): String {
             calls += 1
             lastPrompt = prompt
+             lastConfig = config
             error?.let { throw it }
             return response
         }
