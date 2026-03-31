@@ -7,7 +7,7 @@ import javax.inject.Singleton
 class McpServerRegistry @Inject constructor(
     private val configs: Map<McpServerTarget, McpServerConfig>
 ) {
-    fun defaultTarget(): McpServerTarget = McpServerTarget.CURRENCY
+    fun defaultTarget(): McpServerTarget = McpServerTarget.DEVELOPER
 
     fun getConfig(target: McpServerTarget): McpServerConfig {
         return configs[target] ?: error("No MCP config registered for $target")

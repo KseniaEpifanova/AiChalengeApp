@@ -8,6 +8,7 @@ import com.example.aichalengeapp.agent.guard.GuardResult
 import com.example.aichalengeapp.agent.guard.InvariantGuard
 import com.example.aichalengeapp.agent.guard.InvariantsProfile
 import com.example.aichalengeapp.agent.guard.InvariantsStore
+import com.example.aichalengeapp.agent.help.DeveloperAssistant
 import com.example.aichalengeapp.agent.memory.AgentMemoryStore
 import com.example.aichalengeapp.agent.memory.LongTermMemoryStore
 import com.example.aichalengeapp.agent.memory.WorkingMemoryStore
@@ -33,6 +34,7 @@ import com.example.aichalengeapp.debug.TaskTrace
 import com.example.aichalengeapp.mcp.currency.CurrencyToolResponse
 import com.example.aichalengeapp.mcp.currency.CurrencyToolRouter
 import com.example.aichalengeapp.mcp.currency.McpCurrencyService
+import com.example.aichalengeapp.mcp.git.McpGitService
 import com.example.aichalengeapp.mcp.orchestration.CompositeRequestRouter
 import com.example.aichalengeapp.mcp.orchestration.McpOrchestrator
 import com.example.aichalengeapp.mcp.orchestration.McpOrchestratorResult
@@ -78,6 +80,8 @@ class ChatAgent @Inject constructor(
     private val mcpPipelineService: McpPipelineService,
     private val currencyToolRouter: CurrencyToolRouter,
     private val mcpCurrencyService: McpCurrencyService,
+    private val developerAssistant: DeveloperAssistant,
+    private val mcpGitService: McpGitService,
     private val knowledgeRouter: KnowledgeRouter,
     private val documentRetriever: DocumentRetriever,
     private val retrievalPromptBuilder: RetrievalPromptBuilder,
@@ -375,6 +379,14 @@ class ChatAgent @Inject constructor(
         }
 
         if (forcedIntent == null && transitionSource == "chat") {
+            developerAssistant.parse(trimmed)?.let { helpCommand ->
+                return handleDeveloperHelpCommand(
+                    command = helpCommand,
+                    strategyConfig = strategyConfig,
+                    retrievalMode = retrievalMode
+                )
+            }
+
             when (val route = compositeRequestRouter.route(trimmed)) {
                 is com.example.aichalengeapp.mcp.orchestration.OrchestrationRoute.None -> Unit
                 else -> {
@@ -944,6 +956,190 @@ class ChatAgent @Inject constructor(
         )
     }
 
+    private suspend fun handleDeveloperHelpCommand(
+        command: DeveloperAssistant.HelpCommand,
+        strategyConfig: StrategyConfig,
+        retrievalMode: RetrievalMode
+    ): AgentReply {
+        com.example.aichalengeapp.mcp.McpTrace.d(
+            "event" to "help_command_detected",
+            "message" to command.rawMessage
+        )
+
+        appendUserMessage(strategyConfig, command.rawMessage)
+        if (strategyConfig is StrategyConfig.StickyFacts) {
+            val updatedFacts = factsUpdater.updateFacts(shortTerm.factsJson, command.rawMessage)
+            shortTerm = shortTerm.copy(factsJson = updatedFacts)
+        }
+        shortTermStore.save(shortTerm)
+
+        val question = command.question
+        if (question.isBlank()) {
+            val guidance = developerAssistant.buildGuidanceMessage()
+            appendAssistantMessage(strategyConfig, guidance)
+            shortTermStore.save(shortTerm)
+            com.example.aichalengeapp.mcp.McpTrace.d("event" to "help_response_built", "mode" to "guidance")
+            return AgentReply(
+                text = guidance,
+                metrics = TokenMetrics(0, 0, 0, null, null, null, null),
+                debugLabel = "help"
+            )
+        }
+
+        val shouldRequestBranch = developerAssistant.isGitBranchQuestion(question)
+        val shouldListProjectFiles = developerAssistant.isProjectFilesQuestion(question)
+        val currentBranch = if (shouldRequestBranch) {
+            com.example.aichalengeapp.mcp.McpTrace.d(
+                "event" to "help_request_routed_to",
+                "route" to "MCP",
+                "question" to question
+            )
+            com.example.aichalengeapp.mcp.McpTrace.d(
+                "event" to "help_mcp_branch_requested",
+                "question" to question
+            )
+            mcpGitService.getCurrentGitBranch()
+        } else {
+            null
+        }
+        val projectFiles = if (shouldListProjectFiles) {
+            com.example.aichalengeapp.mcp.McpTrace.d(
+                "event" to "help_request_routed_to",
+                "route" to "MCP",
+                "question" to question
+            )
+            mcpGitService.listProjectFiles()
+        } else {
+            null
+        }
+
+        val docsOnlyReply = if (shouldRequestBranch && looksLikeBranchOnlyQuestion(question)) {
+            developerAssistant.buildBranchReply(currentBranch)
+        } else if (shouldListProjectFiles && looksLikeProjectFilesOnlyQuestion(question)) {
+            developerAssistant.buildProjectFilesReply(projectFiles)
+        } else {
+            null
+        }
+        if (docsOnlyReply != null) {
+            appendAssistantMessage(strategyConfig, docsOnlyReply)
+            shortTermStore.save(shortTerm)
+            com.example.aichalengeapp.mcp.McpTrace.d("event" to "help_response_built", "mode" to "branch_only")
+            return AgentReply(
+                text = docsOnlyReply,
+                metrics = TokenMetrics(0, 0, 0, null, null, null, null),
+                debugLabel = "help"
+            )
+        }
+
+        val llmProvider = llmSettingsStore.load().provider
+        com.example.aichalengeapp.mcp.McpTrace.d(
+            "event" to "help_request_routed_to",
+            "route" to "RAG",
+            "question" to question
+        )
+        com.example.aichalengeapp.mcp.McpTrace.d(
+            "event" to "help_docs_only_mode_enabled",
+            "question" to question
+        )
+        com.example.aichalengeapp.mcp.McpTrace.d(
+            "event" to "help_docs_retrieval_start",
+            "question" to question,
+            "retrievalMode" to retrievalMode
+        )
+        val docsPrompt = runCatching {
+            val retrieved = documentRetriever.retrieve(question, retrievalMode)
+            val docsSelection = developerAssistant.selectDocumentationChunks(retrieved)
+            val docsChunks = if (developerAssistant.hasOnlyDocumentationChunks(docsSelection.chunks)) {
+                docsSelection.chunks
+            } else {
+                emptyList()
+            }
+            com.example.aichalengeapp.mcp.McpTrace.d(
+                "event" to "help_docs_filtered_chunks_count",
+                "question" to question,
+                "retrieved" to retrieved.size,
+                "docsChunks" to docsSelection.chunks.size,
+                "filteredOut" to docsSelection.filteredOutCount
+            )
+            com.example.aichalengeapp.mcp.McpTrace.d(
+                "event" to "help_docs_sources_used",
+                "question" to question,
+                "sources" to docsSelection.sourcesUsed.joinToString(",")
+            )
+            com.example.aichalengeapp.mcp.McpTrace.d(
+                "event" to "help_docs_retrieval_success",
+                "question" to question,
+                "retrieved" to retrieved.size,
+                "docsChunks" to docsChunks.size
+            )
+            if (docsChunks.isEmpty()) {
+                retrievalPromptBuilder.buildNoKnowledgePrompt(question)
+            } else {
+                val limitedChunks = limitRetrievedChunksForProvider(
+                    chunks = docsChunks,
+                    provider = llmProvider,
+                    message = question
+                )
+                val promptOptions = retrievalPromptOptionsForProvider(llmProvider)
+                retrievalPromptBuilder.build(question, limitedChunks, promptOptions)
+            }
+        }.getOrElse { error ->
+            com.example.aichalengeapp.mcp.McpTrace.d(
+                "event" to "help_docs_retrieval_failure",
+                "question" to question,
+                "error" to (error.message ?: error::class.java.simpleName)
+            )
+            retrievalPromptBuilder.buildNoKnowledgePrompt(question)
+        }
+        val helpRetrievalContext = developerAssistant.buildHelpSystemPrompt(
+            question = question,
+            docsPrompt = docsPrompt,
+            currentBranch = currentBranch
+        )
+
+        val strategy = selector.select(strategyConfig)
+        val plan = strategy.build(shortTerm, strategyConfig)
+        val context = orchestrator.buildExecutionContext(
+            profiles = profiles,
+            activeProfileId = activeProfileId,
+            invariants = invariants,
+            taskState = taskManager.getTaskState(),
+            strategyConfig = strategyConfig,
+            message = question,
+            longTermJson = longTermJson,
+            workingJson = workingJson
+        )
+        val contextSystemPrompt = orchestrator.buildContextSystemPrompt(systemPromptBase, context)
+        val profileSystemPrompt = orchestrator.buildProfileSystemPrompt(context)
+        val planSystemMessages = plan.messagesForLlm.filter { it.role == AgentRole.SYSTEM }
+        val historyLimit = historyLimitForProvider(llmProvider)
+        val planHistoryMessages = plan.messagesForLlm
+            .filter { it.role != AgentRole.SYSTEM }
+            .takeLast(historyLimit)
+        val llmMessages = buildList {
+            add(AgentMessage(AgentRole.SYSTEM, helpRetrievalContext))
+            addAll(planSystemMessages)
+            add(AgentMessage(AgentRole.SYSTEM, contextSystemPrompt))
+            add(AgentMessage(AgentRole.SYSTEM, profileSystemPrompt))
+            addAll(planHistoryMessages)
+        }
+        val outputTokensForRequest = maxOutputTokensForProvider(llmProvider)
+        val result = llmRepository.ask(llmMessages, maxOutputTokens = outputTokensForRequest)
+        appendAssistantMessage(strategyConfig, result.text)
+        shortTermStore.save(shortTerm)
+        com.example.aichalengeapp.mcp.McpTrace.d(
+            "event" to "help_response_built",
+            "mode" to "docs_llm",
+            "provider" to llmProvider.name,
+            "branchIncluded" to !currentBranch.isNullOrBlank()
+        )
+        return AgentReply(
+            text = result.text,
+            metrics = TokenMetrics(0, 0, 0, result.usage?.promptTokens, result.usage?.completionTokens, result.usage?.totalTokens, null),
+            debugLabel = "help"
+        )
+    }
+
     private suspend fun migrateLegacyUserProfileIfNeeded(legacy: UserProfile) {
         val active = profileResolver.resolve(profiles, activeProfileId)
         val activeResponse = active.responseProfile
@@ -1128,6 +1324,36 @@ class ChatAgent @Inject constructor(
 
     private fun extractRetrievalChunkCount(retrievalContext: String?): Int {
         return Regex("""CHUNK_ID:""").findAll(retrievalContext.orEmpty()).count()
+    }
+
+    private fun looksLikeBranchOnlyQuestion(question: String): Boolean {
+        val normalized = question.lowercase(Locale.US)
+        val hasBranch = developerAssistant.isGitBranchQuestion(question)
+        val hasDocsIntent = listOf(
+            "architecture",
+            "rag",
+            "local",
+            "remote",
+            "provider",
+            "project",
+            "codebase",
+            "chat flow"
+        ).any { normalized.contains(it) }
+        return hasBranch && !hasDocsIntent
+    }
+
+    private fun looksLikeProjectFilesOnlyQuestion(question: String): Boolean {
+        val normalized = question.lowercase(Locale.US)
+        val hasProjectFiles = developerAssistant.isProjectFilesQuestion(question)
+        val hasDocsIntent = listOf(
+            "architecture",
+            "rag",
+            "local",
+            "remote",
+            "provider",
+            "how does"
+        ).any { normalized.contains(it) }
+        return hasProjectFiles && !hasDocsIntent
     }
 
     private sealed class IntentActionResult {

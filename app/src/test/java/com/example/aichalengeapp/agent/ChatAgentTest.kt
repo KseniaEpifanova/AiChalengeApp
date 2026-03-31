@@ -10,6 +10,7 @@ import com.example.aichalengeapp.agent.facts.FactsUpdater
 import com.example.aichalengeapp.agent.guard.InvariantGuard
 import com.example.aichalengeapp.agent.guard.InvariantsProfile
 import com.example.aichalengeapp.agent.guard.InvariantsStore
+import com.example.aichalengeapp.agent.help.DeveloperAssistant
 import com.example.aichalengeapp.agent.memory.AgentMemoryStore
 import com.example.aichalengeapp.agent.memory.LongTermMemoryStore
 import com.example.aichalengeapp.agent.memory.WorkingMemoryStore
@@ -36,6 +37,7 @@ import com.example.aichalengeapp.mcp.currency.CurrencyRequestParser
 import com.example.aichalengeapp.mcp.currency.CurrencyToolResponse
 import com.example.aichalengeapp.mcp.currency.CurrencyToolRouter
 import com.example.aichalengeapp.mcp.currency.McpCurrencyService
+import com.example.aichalengeapp.mcp.git.McpGitService
 import com.example.aichalengeapp.mcp.orchestration.CompositeRequestRouter
 import com.example.aichalengeapp.mcp.orchestration.McpOrchestrator
 import com.example.aichalengeapp.mcp.pipeline.McpPipelineService
@@ -258,6 +260,94 @@ class ChatAgentTest {
     }
 
     @Test
+    fun `help command uses developer assistant flow`() = runSuspending {
+        val fixture = fixture("Help reply")
+        fixture.agent.init()
+
+        val reply = fixture.agent.handleUserMessage("/help how does RAG work in this app?", StrategyConfig.SlidingWindow())
+
+        assertEquals("help", reply.debugLabel)
+        assertTrue(fixture.repo.lastMessages.first().content.contains("DEVELOPER ASSISTANT MODE"))
+    }
+
+    @Test
+    fun `help command with empty body returns built in guidance`() = runSuspending {
+        val fixture = fixture("LLM fallback")
+        fixture.agent.init()
+
+        val reply = fixture.agent.handleUserMessage("/help", StrategyConfig.SlidingWindow())
+
+        assertEquals("help", reply.debugLabel)
+        assertTrue(reply.text.contains("Developer assistant mode"))
+        assertTrue(fixture.repo.lastMessages.isEmpty())
+    }
+
+    @Test
+    fun `help current git branch uses mcp branch service`() = runSuspending {
+        val fixture = fixture("LLM fallback", currentGitBranch = "feature/day-31")
+        fixture.agent.init()
+
+        val reply = fixture.agent.handleUserMessage("/help what is the current git branch?", StrategyConfig.SlidingWindow())
+
+        assertEquals("help", reply.debugLabel)
+        assertTrue(reply.text.contains("feature/day-31"))
+        assertTrue(fixture.repo.lastMessages.isEmpty())
+    }
+
+    @Test
+    fun `help list project files uses developer mcp service`() = runSuspending {
+        val fixture = fixture("LLM fallback", projectFiles = listOf("README.md", "docs/rag.md"))
+        fixture.agent.init()
+
+        val reply = fixture.agent.handleUserMessage("/help list project files", StrategyConfig.SlidingWindow())
+
+        assertEquals("help", reply.debugLabel)
+        assertTrue(reply.text.contains("Project files:"))
+        assertTrue(reply.text.contains("README.md"))
+        assertTrue(fixture.repo.lastMessages.isEmpty())
+    }
+
+    @Test
+    fun `help flow keeps retrieval focused on markdown docs`() = runSuspending {
+        val fixture = fixture(
+            llmText = "Docs-based help reply",
+            documentRetriever = object : DocumentRetriever {
+                override suspend fun retrieve(query: String, mode: RetrievalMode): List<RetrievedChunk> {
+                    return listOf(
+                        RetrievedChunk(
+                            source = "android-app",
+                            titleOrFile = "ChatAgent.kt",
+                            section = "handleUserMessage",
+                            chunkId = "chat-agent-1",
+                            strategy = "semantic",
+                            text = "This code chunk should not be used for /help.",
+                            similarity = 0.88,
+                            finalScore = 0.88
+                        ),
+                        RetrievedChunk(
+                            source = "docs",
+                            titleOrFile = "rag.md",
+                            section = "overview",
+                            chunkId = "rag-doc-1",
+                            strategy = "semantic",
+                            text = "RAG retrieves relevant chunks from the project index before the model answers.",
+                            similarity = 0.87,
+                            finalScore = 0.87
+                        )
+                    )
+                }
+            }
+        )
+        fixture.agent.init()
+
+        fixture.agent.handleUserMessage("/help how does RAG work?", StrategyConfig.SlidingWindow())
+
+        val helpPrompt = fixture.repo.lastMessages.first().content
+        assertTrue(helpPrompt.contains("rag.md"))
+        assertTrue(!helpPrompt.contains("ChatAgent.kt"))
+    }
+
+    @Test
     fun `weak retrieval does not inject retrieval prompt when grounding is low`() = runSuspending {
         val fixture = fixture(
             llmText = "Fallback LLM answer",
@@ -436,7 +526,9 @@ class ChatAgentTest {
         llmText: String,
         classifierMap: Map<String, String> = emptyMap(),
         documentRetriever: DocumentRetriever? = null,
-        llmProvider: LlmProvider = LlmProvider.REMOTE
+        llmProvider: LlmProvider = LlmProvider.REMOTE,
+        currentGitBranch: String? = "feature/day-31",
+        projectFiles: List<String>? = listOf("README.md", "docs/rag.md")
     ): Fixture {
         val repo = FakeRepo(llmText, classifierMap)
         val shortTermStore = FakeAgentMemoryStore()
@@ -573,6 +665,12 @@ class ChatAgentTest {
                         CurrencyToolResponse.Failure("No data for $base/$target")
                     }
                 }
+            },
+            developerAssistant = DeveloperAssistant(),
+            mcpGitService = object : McpGitService {
+                override suspend fun getCurrentGitBranch(): String? = currentGitBranch
+
+                override suspend fun listProjectFiles(): List<String>? = projectFiles
             },
             knowledgeRouter = KnowledgeRouter(),
             documentRetriever = documentRetriever ?: object : DocumentRetriever {
