@@ -1,4 +1,6 @@
 from pathlib import Path
+import os
+import requests
 
 def load_file(path: str) -> str:
     p = Path(path)
@@ -11,24 +13,8 @@ def trim_text(text: str, max_chars: int) -> str:
         return text
     return text[:max_chars] + "\n...[truncated]..."
 
-def main() -> None:
-    diff = load_file("diff.txt")
-
-    readme = load_file("README.md")
-    architecture = load_file("docs/architecture.md")
-    rag = load_file("docs/rag.md")
-    local_llm = load_file("docs/local-llm.md")
-
-    context = "\n\n".join(
-        [
-            "README:\n" + trim_text(readme, 2000),
-            "ARCHITECTURE:\n" + trim_text(architecture, 2000),
-            "RAG:\n" + trim_text(rag, 2000),
-            "LOCAL LLM:\n" + trim_text(local_llm, 2000),
-        ]
-    )
-
-    prompt = f"""
+def build_prompt(diff: str, context: str) -> str:
+    return f"""
 You are a senior Android engineer reviewing a pull request.
 
 Review the diff using the project documentation context.
@@ -39,8 +25,11 @@ Focus on:
 - maintainability issues
 - recommendations
 
-Be critical but constructive.
-Do not invent issues not supported by the diff.
+Rules:
+- be critical but constructive
+- do not hallucinate
+- only mention issues that are supported by the diff
+- if there are no serious issues, say so clearly
 
 Return exactly in this format:
 
@@ -60,19 +49,62 @@ PR DIFF:
 {trim_text(diff, 12000)}
 """
 
-    print("========== AI REVIEW INPUT ==========")
-    print(prompt)
+def call_llm(prompt: str) -> str:
+    api_key = os.environ["LLM_API_KEY"]
+    base_url = os.environ["LLM_BASE_URL"].rstrip("/")
+    model = os.environ["LLM_MODEL"]
+
+    response = requests.post(
+        f"{base_url}/chat/completions",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": model,
+            "messages": [
+                {"role": "system", "content": "You are a strict but helpful senior Android reviewer."},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.2,
+            "max_tokens": 900,
+        },
+        timeout=120,
+    )
+    response.raise_for_status()
+    data = response.json()
+    return data["choices"][0]["message"]["content"]
+
+def main() -> None:
+    diff = load_file("diff.txt")
+
+    readme = load_file("README.md")
+    architecture = load_file("docs/architecture.md")
+    rag = load_file("docs/rag.md")
+    local_llm = load_file("docs/local-llm.md")
+    help_doc = load_file("docs/help-command.md")
+    mcp_doc = load_file("docs/mcp.md")
+
+    context = "\n\n".join(
+        [
+            "README:\n" + trim_text(readme, 2000),
+            "ARCHITECTURE:\n" + trim_text(architecture, 2000),
+            "RAG:\n" + trim_text(rag, 2000),
+            "LOCAL LLM:\n" + trim_text(local_llm, 2000),
+            "HELP:\n" + trim_text(help_doc, 1500),
+            "MCP:\n" + trim_text(mcp_doc, 1500),
+        ]
+    )
+
+    prompt = build_prompt(diff, context)
+    review = call_llm(prompt)
+
+    final_text = "# AI Code Review\n\n" + review
+
+    Path("review.md").write_text(final_text, encoding="utf-8")
+
     print("========== AI REVIEW RESULT ==========")
-    print("## Potential Bugs")
-    print("- No automated LLM call is connected yet. This is a placeholder review pipeline.")
-    print()
-    print("## Architecture Issues")
-    print("- The workflow is currently set up to collect diff and project context, but not yet send them to an LLM.")
-    print()
-    print("## Recommendations")
-    print("- Connect this script to your LOCAL or REMOTE LLM provider.")
-    print("- Keep diff and docs context size limited to avoid prompt bloat.")
-    print("- Add PR comment publishing as the next step.")
+    print(final_text)
 
 if __name__ == "__main__":
     main()
