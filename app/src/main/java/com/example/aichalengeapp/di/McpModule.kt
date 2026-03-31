@@ -8,6 +8,8 @@ import com.example.aichalengeapp.mcp.currency.FrankfurterApi
 import com.example.aichalengeapp.mcp.currency.FrankfurterHttpApi
 import com.example.aichalengeapp.mcp.currency.McpCurrencyService
 import com.example.aichalengeapp.mcp.currency.McpCurrencyServiceImpl
+import com.example.aichalengeapp.mcp.git.McpGitService
+import com.example.aichalengeapp.mcp.git.McpGitServiceImpl
 import com.example.aichalengeapp.mcp.pipeline.McpPipelineService
 import com.example.aichalengeapp.mcp.pipeline.McpPipelineServiceImpl
 import dagger.Module
@@ -23,10 +25,10 @@ object McpModule {
     @Provides
     @Singleton
     fun provideMcpServerRegistry(): McpServerRegistry {
+        val singleServerConfig = McpServerConfig.remote(BuildConfig.MCP_BASE_URL)
         return McpServerRegistry(
             configs = mapOf(
-                McpServerTarget.CURRENCY to McpServerConfig.remote(BuildConfig.MCP_CURRENCY_BASE_URL),
-                McpServerTarget.PIPELINE to McpServerConfig.remote(BuildConfig.MCP_PIPELINE_BASE_URL)
+                McpServerTarget.DEVELOPER to singleServerConfig
             )
         )
     }
@@ -38,6 +40,10 @@ object McpModule {
     @Provides
     @Singleton
     fun provideMcpCurrencyService(impl: McpCurrencyServiceImpl): McpCurrencyService = impl
+
+    @Provides
+    @Singleton
+    fun provideMcpGitService(impl: McpGitServiceImpl): McpGitService = impl
 
     @Provides
     @Singleton

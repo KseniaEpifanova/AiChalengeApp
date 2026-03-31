@@ -6,6 +6,7 @@ import com.example.aichalengeapp.mcp.McpConnectionState
 import com.example.aichalengeapp.mcp.McpMultiServerRepository
 import com.example.aichalengeapp.mcp.McpServerRegistry
 import com.example.aichalengeapp.mcp.McpServerTarget
+import com.example.aichalengeapp.mcp.McpTrace
 import com.example.aichalengeapp.mcp.McpToolUiModel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,9 +28,13 @@ class McpViewModel @Inject constructor(
     private val serverRegistry: McpServerRegistry
 ) : ViewModel() {
 
+    private val debugTargets: List<McpServerTarget> = filteredDebugTargets()
+
     private val _uiState = MutableStateFlow(
         McpUiState(
-            serverUrls = serverRegistry.describe().associate { it.target to it.endpoint }
+            serverUrls = serverRegistry.describe()
+                .filter { it.target in debugTargets }
+                .associate { it.target to it.endpoint }
         )
     )
     val uiState: StateFlow<McpUiState> = _uiState.asStateFlow()
@@ -41,7 +46,7 @@ class McpViewModel @Inject constructor(
                 error = null
             )
 
-            val targets = serverRegistry.allTargets()
+            val targets = debugTargets
             val connectFailures = mutableListOf<String>()
             targets.forEach { target ->
                 val connect = repository.connect(target)
@@ -93,8 +98,27 @@ class McpViewModel @Inject constructor(
             repository.disconnectAll()
             _uiState.value = McpUiState(
                 connectionState = McpConnectionState.IDLE,
-                serverUrls = serverRegistry.describe().associate { it.target to it.endpoint }
+                serverUrls = serverRegistry.describe()
+                    .filter { it.target in debugTargets }
+                    .associate { it.target to it.endpoint }
             )
         }
+    }
+
+    private fun filteredDebugTargets(): List<McpServerTarget> {
+        val registeredTargets = serverRegistry.allTargets()
+        if (registeredTargets.size > 1) {
+            McpTrace.d(
+                "event" to "mcp_debug_multiple_servers_warning",
+                "registeredTargets" to registeredTargets.joinToString(",") { it.serverId },
+                "preferredTarget" to McpServerTarget.DEVELOPER.serverId
+            )
+        }
+        val finalTargets = registeredTargets.filter { it == McpServerTarget.DEVELOPER }
+        McpTrace.d(
+            "event" to "mcp_debug_servers_filtered",
+            "finalServerList" to finalTargets.joinToString(",") { it.serverId }
+        )
+        return finalTargets
     }
 }

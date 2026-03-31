@@ -83,6 +83,7 @@ fun McpDebugScreen(
 
 private fun targetLabel(target: McpServerTarget): String {
     return when (target) {
+        McpServerTarget.DEVELOPER -> "Developer server"
         McpServerTarget.CURRENCY -> "Currency server"
         McpServerTarget.PIPELINE -> "Pipeline server"
     }
