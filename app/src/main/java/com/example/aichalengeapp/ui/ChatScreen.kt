@@ -54,6 +54,7 @@ import kotlinx.coroutines.launch
 
 private enum class MainDestination {
     CHAT,
+    SUPPORT,
     PROFILES,
     INVARIANT_GUARD,
     SETTINGS,
@@ -136,6 +137,14 @@ fun ChatScreen(
                     }
                 )
                 NavigationDrawerItem(
+                    label = { Text("Support") },
+                    selected = destination == MainDestination.SUPPORT,
+                    onClick = {
+                        destination = MainDestination.SUPPORT
+                        scope.launch { drawerState.close() }
+                    }
+                )
+                NavigationDrawerItem(
                     label = { Text("Profiles") },
                     selected = destination == MainDestination.PROFILES,
                     onClick = {
@@ -176,6 +185,7 @@ fun ChatScreen(
                     title = {
                         val title = when (destination) {
                             MainDestination.CHAT -> "AI Assistant"
+                            MainDestination.SUPPORT -> "Support"
                             MainDestination.PROFILES -> "Profiles"
                             MainDestination.INVARIANT_GUARD -> "Invariant Guard"
                             MainDestination.SETTINGS -> "Settings"
@@ -205,6 +215,12 @@ fun ChatScreen(
             }
         ) { innerPadding ->
             when (destination) {
+                MainDestination.SUPPORT -> {
+                    SupportScreen(
+                        modifier = Modifier.padding(innerPadding)
+                    )
+                }
+
                 MainDestination.PROFILES -> {
                     ProfilesScreen(
                         profiles = profiles,

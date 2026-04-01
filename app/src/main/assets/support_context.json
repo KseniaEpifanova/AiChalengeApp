@@ -1,0 +1,9 @@
+{
+  "userId": "demo-user-001",
+  "userName": "Casey",
+  "plan": "Pro",
+  "appVersion": "1.0.0",
+  "recentTicketId": "SUP-1042",
+  "recentTicketSummary": "LOCAL model request timed out after a long prompt.",
+  "recentTicketStatus": "open"
+}
