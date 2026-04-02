@@ -1,0 +1,22 @@
+[
+  {
+    "source": "support-faq",
+    "title": "LOCAL model timeout",
+    "text": "LOCAL model responses can slow down or time out when the prompt is too large. Reducing retrieved context, using a smaller prompt, or checking the local model endpoint usually resolves the issue."
+  },
+  {
+    "source": "support-faq",
+    "title": "REMOTE provider unavailable",
+    "text": "If the REMOTE provider fails, verify the API key and base URL. Network connectivity or provider-side issues can also cause temporary failures."
+  },
+  {
+    "source": "support-faq",
+    "title": "RAG answer seems incomplete",
+    "text": "RAG answers depend on indexed documents and retrieval confidence. If the relevant document is missing or retrieval confidence is low, the answer may say that context is insufficient."
+  },
+  {
+    "source": "support-faq",
+    "title": "App keeps showing loading",
+    "text": "A persistent loading state usually means the model request is still running or the local endpoint is unreachable. Check the selected provider and the configured local base URL."
+  }
+]
