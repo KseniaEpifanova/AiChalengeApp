@@ -57,6 +57,20 @@ class McpClientManager @Inject constructor(
 
             val initResponse = postJson(remoteEndpoint, initializePayload, session = null)
             McpTrace.d("event" to "connect_initialize_response", "contentType" to initResponse.contentType)
+            if (isInitializeMethodNotSupported(initResponse.body)) {
+                McpTrace.d(
+                    "event" to "connect_initialize_skipped",
+                    "server" to target.serverId,
+                    "reason" to "initialize_not_supported"
+                )
+                connections[target] = ConnectionState(
+                    endpoint = remoteEndpoint,
+                    sessionId = initResponse.sessionId,
+                    connected = true
+                )
+                McpTrace.d("event" to "connect_success", "server" to target.serverId, "url" to remoteEndpoint, "hasSession" to (initResponse.sessionId != null))
+                return@withLock
+            }
             val initJson = parseProtocolJson(initResponse.body)
             if (initJson.has("error")) {
                 error("MCP initialize error: ${initJson.getJSONObject("error").optString("message", "unknown")}")
@@ -262,6 +276,15 @@ class McpClientManager @Inject constructor(
             payloads += current.toString()
         }
         return payloads
+    }
+
+    internal fun isInitializeMethodNotSupported(raw: String): Boolean {
+        val normalized = raw.lowercase(Locale.US)
+        val hasMethodMissingCode = normalized.contains("\"code\":-32601") || normalized.contains("\"code\": -32601")
+        val mentionsInitializeMissing =
+            normalized.contains("method initialize not found") ||
+                normalized.contains("initialize not found")
+        return hasMethodMissingCode && mentionsInitializeMissing
     }
 
     fun extractTextContent(result: JSONObject): String? {

@@ -7,7 +7,9 @@ import com.example.aichalengeapp.mcp.McpServerRegistry
 import com.example.aichalengeapp.mcp.McpServerTarget
 import com.example.aichalengeapp.mcp.McpToolUiModel
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class McpGitServiceTest {
@@ -89,5 +91,54 @@ class McpGitServiceTest {
         )
 
         assertEquals("list_project_files", resolved)
+    }
+
+    @Test
+    fun `resolve read file tool name matches supported aliases dynamically`() {
+        val resolved = service.resolveReadFileToolName(
+            listOf(
+                McpToolUiModel(name = "search_docs", description = ""),
+                McpToolUiModel(name = "read_file", description = "")
+            )
+        )
+
+        assertEquals("read_file", resolved)
+    }
+
+    @Test
+    fun `resolve write file tool name matches supported aliases dynamically`() {
+        val resolved = service.resolveWriteFileToolName(
+            listOf(
+                McpToolUiModel(name = "search_docs", description = ""),
+                McpToolUiModel(name = "save-file", description = "")
+            )
+        )
+
+        assertEquals("save-file", resolved)
+    }
+
+    @Test
+    fun `extract project files from text parses json object safely`() {
+        val raw = """{"files":["README.md","app/src/main/java/com/example/aichalengeapp/mcp/git/McpGitService.kt"]}"""
+
+        val files = service.extractProjectFilesFromText(raw)
+
+        assertEquals(
+            listOf(
+                "README.md",
+                "app/src/main/java/com/example/aichalengeapp/mcp/git/McpGitService.kt"
+            ),
+            files
+        )
+        assertFalse(files.orEmpty().contains(raw))
+    }
+
+    @Test
+    fun `extract project files from text rejects whole json payload as a path`() {
+        val raw = """{"files":["README.md"]}"""
+
+        val files = service.extractProjectFilesFromText(raw)
+
+        assertTrue(files.orEmpty().all { it != raw })
     }
 }

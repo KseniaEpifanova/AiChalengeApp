@@ -49,20 +49,22 @@ class SupportAssistantTest {
     }
 
     @Test
-    fun `blank support question is rejected`() = runBlocking {
-        val assistant = SupportAssistantImpl(
-            knowledgeRepository = object : SupportKnowledgeRepository {
-                override suspend fun retrieve(question: String): List<SupportKnowledgeChunk> = emptyList()
-            },
-            contextRepository = object : SupportContextRepository {
-                override suspend fun loadContext(question: String): SupportUserContext? = null
-            },
-            chatRepository = RecordingChatRepository("unused")
-        )
+    fun `blank support question is rejected`() {
+        runBlocking {
+            val assistant = SupportAssistantImpl(
+                knowledgeRepository = object : SupportKnowledgeRepository {
+                    override suspend fun retrieve(question: String): List<SupportKnowledgeChunk> = emptyList()
+                },
+                contextRepository = object : SupportContextRepository {
+                    override suspend fun loadContext(question: String): SupportUserContext? = null
+                },
+                chatRepository = RecordingChatRepository("unused")
+            )
 
-        runCatching { assistant.answer("   ") }
-            .onSuccess { error("Expected failure") }
-            .onFailure { assertTrue(it is IllegalArgumentException) }
+            runCatching { assistant.answer("   ") }
+                .onSuccess { error("Expected failure") }
+                .onFailure { assertTrue(it is IllegalArgumentException) }
+        }
     }
 
     private class RecordingChatRepository(
