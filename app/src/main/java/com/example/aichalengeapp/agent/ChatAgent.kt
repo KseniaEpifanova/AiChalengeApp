@@ -3,6 +3,8 @@ package com.example.aichalengeapp.agent
 import com.example.aichalengeapp.agent.context.AgentMemoryState
 import com.example.aichalengeapp.agent.context.ContextStrategySelector
 import com.example.aichalengeapp.agent.context.StrategyConfig
+import com.example.aichalengeapp.agent.file.FileOperationRouter
+import com.example.aichalengeapp.agent.file.FileOperationService
 import com.example.aichalengeapp.agent.facts.FactsUpdater
 import com.example.aichalengeapp.agent.guard.GuardResult
 import com.example.aichalengeapp.agent.guard.InvariantGuard
@@ -82,6 +84,8 @@ class ChatAgent @Inject constructor(
     private val mcpCurrencyService: McpCurrencyService,
     private val developerAssistant: DeveloperAssistant,
     private val mcpGitService: McpGitService,
+    private val fileOperationRouter: FileOperationRouter,
+    private val fileOperationService: FileOperationService,
     private val knowledgeRouter: KnowledgeRouter,
     private val documentRetriever: DocumentRetriever,
     private val retrievalPromptBuilder: RetrievalPromptBuilder,
@@ -384,6 +388,14 @@ class ChatAgent @Inject constructor(
                     command = helpCommand,
                     strategyConfig = strategyConfig,
                     retrievalMode = retrievalMode
+                )
+            }
+
+            fileOperationRouter.route(trimmed)?.let { fileIntent ->
+                return handleFileOperationIntent(
+                    strategyConfig = strategyConfig,
+                    userMessage = trimmed,
+                    fileIntent = fileIntent
                 )
             }
 
@@ -953,6 +965,28 @@ class ChatAgent @Inject constructor(
                 actualTotalTokens = result.usage?.totalTokens,
                 estimatedCostUsd = cost
             )
+        )
+    }
+
+    private suspend fun handleFileOperationIntent(
+        strategyConfig: StrategyConfig,
+        userMessage: String,
+        fileIntent: com.example.aichalengeapp.agent.file.FileOperationIntent
+    ): AgentReply {
+        appendUserMessage(strategyConfig, userMessage)
+        if (strategyConfig is StrategyConfig.StickyFacts) {
+            val updatedFacts = factsUpdater.updateFacts(shortTerm.factsJson, userMessage)
+            shortTerm = shortTerm.copy(factsJson = updatedFacts)
+        }
+        shortTermStore.save(shortTerm)
+
+        val result = fileOperationService.execute(fileIntent)
+        appendAssistantMessage(strategyConfig, result.text)
+        shortTermStore.save(shortTerm)
+        return AgentReply(
+            text = result.text,
+            metrics = TokenMetrics(0, 0, 0, null, null, null, null),
+            debugLabel = result.debugLabel
         )
     }
 

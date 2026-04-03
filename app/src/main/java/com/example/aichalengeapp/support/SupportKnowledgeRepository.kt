@@ -15,7 +15,7 @@ class JsonSupportKnowledgeRepository @Inject constructor(
     @ApplicationContext private val context: Context
 ) : SupportKnowledgeRepository {
 
-    private val cachedEntries by lazy(LazyThreadSafetyMode.NONE) { loadEntries() }
+    private val cachedEntries by lazy(LazyThreadSafetyMode.NONE                                                                       ) { loadEntries() }
 
     override suspend fun retrieve(question: String): List<SupportKnowledgeChunk> {
         val tokens = tokenize(question)

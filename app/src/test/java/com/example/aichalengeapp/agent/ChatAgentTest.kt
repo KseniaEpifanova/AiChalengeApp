@@ -6,6 +6,8 @@ import com.example.aichalengeapp.agent.context.ContextStrategySelector
 import com.example.aichalengeapp.agent.context.SlidingWindowStrategy
 import com.example.aichalengeapp.agent.context.StickyFactsStrategy
 import com.example.aichalengeapp.agent.context.StrategyConfig
+import com.example.aichalengeapp.agent.file.FileOperationRouter
+import com.example.aichalengeapp.agent.file.FileOperationService
 import com.example.aichalengeapp.agent.facts.FactsUpdater
 import com.example.aichalengeapp.agent.guard.InvariantGuard
 import com.example.aichalengeapp.agent.guard.InvariantsProfile
@@ -671,7 +673,35 @@ class ChatAgentTest {
                 override suspend fun getCurrentGitBranch(): String? = currentGitBranch
 
                 override suspend fun listProjectFiles(): List<String>? = projectFiles
+
+                override suspend fun readProjectFile(path: String): String? = when (path) {
+                    "app/src/main/java/com/example/aichalengeapp/mcp/McpClientManager.kt" -> "McpClientManager handles tools/list and tools/call."
+                    "app/src/main/java/com/example/aichalengeapp/agent/ChatAgent.kt" -> "ChatAgent routes /help and MCP requests."
+                    "app/src/main/java/com/example/aichalengeapp/vm/SupportViewModel.kt" -> "SupportViewModel submits support questions and exposes UI state."
+                    "app/src/main/java/com/example/aichalengeapp/support/SupportAssistant.kt" -> "SupportAssistant builds support answers from FAQ and context."
+                    "docs/help-command.md" -> "The /help command uses docs and MCP."
+                    else -> null
+                }
+
+                override suspend fun writeProjectFile(path: String, content: String): Boolean = true
             },
+            fileOperationRouter = FileOperationRouter(),
+            fileOperationService = FileOperationService(
+                mcpGitService = object : McpGitService {
+                    override suspend fun getCurrentGitBranch(): String? = currentGitBranch
+                    override suspend fun listProjectFiles(): List<String>? = projectFiles
+                    override suspend fun readProjectFile(path: String): String? = when (path) {
+                        "app/src/main/java/com/example/aichalengeapp/mcp/McpClientManager.kt" -> "McpClientManager handles tools/list and tools/call."
+                        "app/src/main/java/com/example/aichalengeapp/agent/ChatAgent.kt" -> "ChatAgent routes /help and MCP requests."
+                        "app/src/main/java/com/example/aichalengeapp/vm/SupportViewModel.kt" -> "SupportViewModel submits support questions and exposes UI state."
+                        "app/src/main/java/com/example/aichalengeapp/support/SupportAssistant.kt" -> "SupportAssistant builds support answers from FAQ and context."
+                        "docs/help-command.md" -> "The /help command uses docs and MCP."
+                        else -> null
+                    }
+                    override suspend fun writeProjectFile(path: String, content: String): Boolean = true
+                },
+                llmRepository = repo
+            ),
             knowledgeRouter = KnowledgeRouter(),
             documentRetriever = documentRetriever ?: object : DocumentRetriever {
                 override suspend fun retrieve(query: String, mode: RetrievalMode): List<RetrievedChunk> {

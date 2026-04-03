@@ -4,6 +4,7 @@ import com.example.aichalengeapp.support.SupportAnswer
 import com.example.aichalengeapp.support.SupportAssistant
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -15,6 +16,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class SupportViewModelTest {
 
     private val dispatcher = StandardTestDispatcher()
